@@ -1,0 +1,46 @@
+<% layout('partials/_layout', { title: piece.prompt.slice(0, 40), route: '' }) %>
+
+<figure class="max-w-4xl mx-auto">
+    <img src="<%= piece.publicUrl %>" alt="<%= piece.prompt %>" class="w-full rounded-md shadow-md">
+
+    <figcaption class="mt-6">
+        <p class="text-xl serif italic mb-2"><%= piece.prompt %></p>
+        <p class="text-sm text-gray-500">
+            Generated via <%= piece.model %> · <%= piece.created_at.toLocaleString() %>
+        </p>
+
+        <a href="<%= piece.publicUrl %>" download
+           class="mt-4 inline-block px-4 py-2 border border-gray-800 rounded-md hover:bg-gray-800 hover:text-white">
+            Download PNG
+        </a>
+    </figcaption>
+</figure>
+
+<!-- ───────── Regenerate form ───────── -->
+<form id="regen"
+      class="mt-10 flex flex-col md:flex-row gap-3 max-w-4xl mx-auto"
+      enctype="multipart/form-data">
+    <input name="feedback" type="text" required
+           placeholder="Change something…"
+           class="flex-1 border px-3 py-1 rounded-md" />
+
+    <input name="files" type="file" multiple
+           class="border px-2 py-1 rounded-md" />
+
+    <button class="px-4 py-2 bg-gray-900 text-white rounded-md">
+        Regenerate
+    </button>
+</form>
+
+<script>
+    document.getElementById('regen').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd  = new FormData(e.target);
+        const res = await fetch('/api/regenerate/<%= piece.id %>', {
+            method: 'POST',
+            body: fd
+        });
+        const data = await res.json();
+        location.href = '/image/' + data.id;  // jump to the new version
+    });
+</script>

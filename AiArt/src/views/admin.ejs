@@ -1,0 +1,28 @@
+<% layout('partials/_layout', { title: 'Admin', route: '' }) %>
+
+<h2 class="text-3xl font-semibold mb-6">Admin Dashboard</h2>
+
+<table class="w-full text-sm">
+    <thead>
+    <tr class="border-b">
+        <th class="text-left py-2">ID</th>
+        <th class="text-left">Prompt</th>
+        <th class="text-left">Created</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    <% images.forEach(img => { %>
+        <tr class="border-b hover:bg-gray-50">
+            <td class="py-1"><%= img.id %></td>
+            <td class="truncate max-w-xs"><%= img.prompt %></td>
+            <td><%= img.created_at.toLocaleDateString() %></td>
+            <td class="text-right">
+                <form method="POST" action="/admin/delete/<%= img.id %>" onsubmit="return confirm('Delete image?')">
+                    <button class="text-red-600 hover:underline">Delete</button>
+                </form>
+            </td>
+        </tr>
+    <% }) %>
+    </tbody>
+</table>

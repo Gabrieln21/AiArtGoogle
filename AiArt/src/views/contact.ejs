@@ -1,0 +1,21 @@
+<% layout('partials/_layout', { title: 'Contact', route: 'contact' }) %>
+
+<section class="max-w-xl mx-auto">
+    <h2 class="text-3xl font-semibold mb-6">Get in touch</h2>
+
+    <p class="mb-8">For commissions, exhibitions, or workshops, drop a note below or
+        email <a href="mailto:hello@example.com" class="text-blue-600 underline">hello@example.com</a>.</p>
+
+    <form action="/contact" method="POST" class="space-y-4">
+        <input name="name" type="text" placeholder="Your name" class="w-full border border-gray-300 px-4 py-2 rounded-md focus:border-gray-500 focus:ring-0 transition-colors" required>
+        <input name="email" type="email" placeholder="Your email" class="w-full border border-gray-300 px-4 py-2 rounded-md focus:border-gray-500 focus:ring-0 transition-colors" required>
+        <textarea name="message" rows="5" placeholder="Message" class="w-full border border-gray-300 px-4 py-2 rounded-md focus:border-gray-500 focus:ring-0 transition-colors" required></textarea>
+        <button class="px-6 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Send Message</button>
+    </form>
+
+    <!-- Social embeds -->
+    <div class="mt-12 flex space-x-6 text-3xl text-gray-500">
+        <a href="https://instagram.com" class="hover:text-gray-900 transition-colors"><i class="fab fa-instagram"></i></a>
+        <a href="https://vimeo.com" class="hover:text-gray-900 transition-colors"><i class="fab fa-vimeo-v"></i></a>
+    </div>
+</section>

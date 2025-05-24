@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8" />
+    <title><%= typeof title !== 'undefined' ? title + ' – Irene Carvajal' : 'Irene Carvajal' %></title>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Inter / Lora for clean serif+sans pairing -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: Inter, sans-serif; }
+
+        .masonry-grid {
+            column-count: 3;
+            column-gap: 20px;
+            column-fill: balance;
+        }
+
+        @media (max-width: 1024px) {
+            .masonry-grid { column-count: 2; }
+        }
+
+        @media (max-width: 640px) {
+            .masonry-grid { column-count: 1; }
+        }
+
+        .masonry-item {
+            break-inside: avoid;
+            margin-bottom: 20px;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .hover-scale {
+            transition: transform 0.2s ease;
+        }
+
+        .hover-scale:hover {
+            transform: scale(1.01);
+        }
+    </style>
+</head>
+
+<body class="h-full bg-white text-gray-800 antialiased">
+<!-- ========== SIDEBAR ========== -->
+<aside class="fixed inset-y-0 left-0 w-60 px-8 pt-10 border-r border-gray-200 bg-white flex flex-col justify-between">
+    <div>
+        <h1 class="text-xl font-semibold tracking-wide text-gray-900">irene&nbsp;carvajal</h1>
+        <p class="text-sm text-gray-500 mt-1">artist | educator | curator</p>
+
+        <nav class="mt-10 space-y-4 font-medium">
+            <a href="/" class="<%= route==='home' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-900' %> block transition-colors">portfolio</a>
+            <a href="/archive" class="<%= route==='archive' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-900' %> block transition-colors">archive</a>
+            <a href="/about" class="<%= route==='about' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-900' %> block transition-colors">about the artist</a>
+            <a href="/contact" class="<%= route==='contact' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-900' %> block transition-colors">contact</a>
+        </nav>
+    </div>
+
+    <div class="pb-8 flex space-x-5 text-gray-500">
+        <a href="mailto:hello@example.com" class="hover:text-gray-900 transition-colors"><i class="fas fa-envelope"></i></a>
+        <a href="https://instagram.com" class="hover:text-gray-900 transition-colors"><i class="fab fa-instagram"></i></a>
+        <a href="https://vimeo.com" class="hover:text-gray-900 transition-colors"><i class="fab fa-vimeo-v"></i></a>
+    </div>
+</aside>
+
+<!-- ========== MAIN ========== -->
+<main class="ml-60 min-h-screen px-10 py-12">
+    <%- body %>
+</main>
+
+<!-- Font Awesome icons -->
+<script src="https://kit.fontawesome.com/4ad52d1665.js" crossorigin="anonymous"></script>
+</body>
+</html>

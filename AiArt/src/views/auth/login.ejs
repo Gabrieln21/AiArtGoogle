@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNO - Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        body {
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            background: #0a0a0a;
+            min-height: 100vh;
+            perspective: 1000px;
+        }
+
+        .auth-container {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 1;
+        }
+
+        .background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at center, #1a1a1a 0%, #000000 100%);
+            z-index: -2;
+            animation: pulseBackground 8s ease-in-out infinite;
+        }
+
+        @keyframes pulseBackground {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            transform-style: preserve-3d;
+        }
+
+        .particle {
+            position: absolute;
+            width: 60px;
+            height: 90px;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 90"><rect width="60" height="90" rx="10" fill="%23ff0000"/><text x="30" y="50" font-family="Arial" font-size="24" fill="white" text-anchor="middle" dominant-baseline="middle">UNO</text></svg>') no-repeat center/contain;
+            transform-style: preserve-3d;
+        }
+
+        .login-box {
+            background: rgba(15, 15, 15, 0.95);
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(255, 0, 0, 0.3),
+                        inset 0 0 30px rgba(255, 0, 0, 0.1);
+            width: 100%;
+            max-width: 450px;
+            border: 1px solid rgba(255, 0, 0, 0.2);
+            backdrop-filter: blur(20px);
+            transform-style: preserve-3d;
+            animation: loginBoxFloat 6s ease-in-out infinite;
+        }
+
+        @keyframes loginBoxFloat {
+            0%, 100% { transform: translateY(0) rotateX(0deg); }
+            50% { transform: translateY(-10px) rotateX(2deg); }
+        }
+
+        .login-title {
+            text-align: center;
+            font-size: 3.2rem;
+            margin-bottom: 2.5rem;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 4px;
+            background: linear-gradient(45deg, #ff0000, #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: glowText 3s ease-in-out infinite;
+        }
+
+        @keyframes glowText {
+            0%, 100% { text-shadow: 0 0 20px rgba(255, 0, 0, 0.5); }
+            50% { text-shadow: 0 0 40px rgba(255, 0, 0, 0.8); }
+        }
+
+        .form-group {
+            margin-bottom: 2rem;
+            position: relative;
+            transform-style: preserve-3d;
+        }
+
+        .form-group label {
+            color: #ffffff;
+            font-size: 1.1rem;
+            margin-bottom: 0.8rem;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .form-control {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 0, 0, 0.2);
+            border-radius: 12px;
+            color: white;
+            padding: 1.2rem;
+            width: 100%;
+            transition: all 0.3s ease;
+            font-size: 1.1rem;
+        }
+
+        .form-control:focus {
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+            border-color: #ff0000;
+            outline: none;
+            transform: translateZ(10px);
+        }
+
+        .btn-login {
+            background: linear-gradient(45deg, #ff0000, #ff3333);
+            color: white;
+            padding: 1.2rem;
+            border: none;
+            border-radius: 12px;
+            width: 100%;
+            font-size: 1.3rem;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 3px;
+            transition: all 0.4s ease;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(255, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-login:before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+            transform: scale(0);
+            transition: transform 0.6s ease-out;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 10px 30px rgba(255, 0, 0, 0.5);
+            background: linear-gradient(45deg, #ff3333, #ff0000);
+        }
+
+        .btn-login:hover:before {
+            transform: scale(1) rotate(45deg);
+        }
+
+        .signup-link {
+            text-align: center;
+            margin-top: 2rem;
+            color: #ffffff;
+            font-size: 1.1rem;
+        }
+
+        .signup-link a {
+            color: #ff0000;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .signup-link a:after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            bottom: -4px;
+            left: 0;
+            background: linear-gradient(90deg, transparent, #ff0000, transparent);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .signup-link a:hover {
+            color: #ff3333;
+            text-shadow: 0 0 15px rgba(255, 0, 0, 0.7);
+        }
+
+        .signup-link a:hover:after {
+            transform: scaleX(1);
+        }
+
+        .alert {
+            background: rgba(220, 53, 69, 0.9);
+            color: white;
+            border: none;
+            margin-bottom: 1.5rem;
+            padding: 1.2rem;
+            border-radius: 12px;
+            text-align: center;
+            animation: alertPulse 2s infinite;
+            box-shadow: 0 0 20px rgba(220, 53, 69, 0.4);
+        }
+
+        @keyframes alertPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.02); opacity: 0.9; }
+        }
+
+        .back-button {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            color: #ff0000;
+            text-decoration: none;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+            transition: all 0.3s ease;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(20, 20, 20, 0.8);
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 0, 0, 0.3);
+        }
+
+        .back-button:before {
+            content: '←';
+            font-size: 1.4rem;
+        }
+
+        .back-button:hover {
+            color: #ff3333;
+            text-shadow: 0 0 25px rgba(255, 0, 0, 0.7);
+            transform: translateX(-5px);
+            background: rgba(20, 20, 20, 0.9);
+            border-color: rgba(255, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-button">Back</a>
+    <div class="background"></div>
+    <div class="particles" id="particles"></div>
+    <div class="auth-container">
+        <div class="login-box">
+            <h1 class="login-title">UNO Login</h1>
+            <form class="auth-form" action="/auth/login" method="POST">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required class="form-control" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required class="form-control" autocomplete="current-password">
+                </div>
+                <% if (messages.error) { %>
+                    <div class="alert alert-danger"><%= messages.error %></div>
+                <% } %>
+                <button type="submit" class="btn btn-login">Login</button>
+            </form>
+            <div class="signup-link">
+                <p>Don't have an account? <a href="/auth/signup">Sign up here</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function createParticle() {
+            const container = document.getElementById('particles');
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.style.filter = `hue-rotate(${Math.random() * 360}deg)`;
+            particle.style.left = `${Math.random() * 100}%`;
+
+            // Start from below the viewport
+            particle.style.top = '120vh';
+
+            // Random starting rotation
+            const startRotX = Math.random() * 360;
+            const startRotY = Math.random() * 360;
+            const startRotZ = Math.random() * 360;
+
+            // Random end rotation
+            const endRotX = startRotX + 360 + Math.random() * 360;
+            const endRotY = startRotY + 360 + Math.random() * 360;
+            const endRotZ = startRotZ + 360 + Math.random() * 360;
+
+            // Custom animation
+            particle.animate([
+                {
+                    transform: `translate3d(0, 0, 0) rotateX(${startRotX}deg) rotateY(${startRotY}deg) rotateZ(${startRotZ}deg)`,
+                    opacity: 0.8
+                },
+                {
+                    transform: `translate3d(0, -120vh, 200px) rotateX(${endRotX}deg) rotateY(${endRotY}deg) rotateZ(${endRotZ}deg)`,
+                    opacity: 0.8
+                }
+            ], {
+                duration: 15000 + Math.random() * 10000, // 15-25 seconds
+                easing: 'linear',
+                iterations: 1
+            }).onfinish = () => {
+                particle.remove();
+                createParticle(); // Create a new particle when this one finishes
+            };
+
+            container.appendChild(particle);
+        }
+
+        function startParticleSystem() {
+            // Initial batch of particles
+            const numParticles = 15;
+            for (let i = 0; i < numParticles; i++) {
+                // Stagger the creation of initial particles
+                setTimeout(() => {
+                    createParticle();
+                }, i * (2000 / numParticles)); // Spread over 2 seconds
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', startParticleSystem);
+    </script>
+</body>
+</html>
