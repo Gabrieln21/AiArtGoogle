@@ -12,7 +12,7 @@ router.get("/image/:id", async (req, res, next) => {
         const { rows } = await pool.query<
             { id: number; prompt: string; gcs_path: string; model: string; created_at: Date }
         >(
-            `SELECT * FROM images WHERE id = $1 LIMIT 1`,
+            /*sql*/ `SELECT * FROM images WHERE id = $1 LIMIT 1`,
             [req.params.id]
         );
 
