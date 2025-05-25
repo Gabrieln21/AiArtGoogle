@@ -54,9 +54,19 @@ async function getById(id: number): Promise<ImageRecord | null> {
     return rows[0] ?? null;
 }
 
+async function listRecent(limit: number = 50): Promise<ImageRecord[]> {
+    const { rows } = await pool.query(
+        `SELECT * FROM images
+         ORDER BY created_at DESC
+             LIMIT $1`,
+        [limit]
+    );
+    return rows;
+}
+
 export const ImagesService = {
     create,
     createRevision,
     getById,
-    // add other list/query helpers later…
+    listRecent
 };

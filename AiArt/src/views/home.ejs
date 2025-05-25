@@ -72,30 +72,45 @@
         <h1 class="text-2xl font-semibold text-gray-900 mb-2">Participate in the art!</h1>
         <h3 class="text-lg text-gray-600 mb-8">Explain the piece..</h3>
 
-        <!-- Form -->
         <form id="genForm" class="max-w-2xl space-y-4" enctype="multipart/form-data">
+            <!-- Primary creative prompt -->
             <input
-                id="promptInput"
-                name="prompt"
-                type="text"
-                placeholder="Prompt…"
-                class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
+                    id="promptInput"
+                    name="prompt"
+                    type="text"
+                    placeholder="Main image description…"
+                    class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
             />
+
+            <!-- Last Google Search -->
             <input
-                id="fileInput"
-                name="files"
-                type="file"
-                multiple
-                class="w-full border border-gray-300 px-3 py-2 rounded-md file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+                    id="lastSearchInput"
+                    name="lastSearch"
+                    type="text"
+                    placeholder="Your last Google search (optional)"
+                    class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
             />
+
+
+            <!-- Optional file upload -->
+            <input
+                    id="fileInput"
+                    name="files"
+                    type="file"
+                    multiple
+                    class="w-full border border-gray-300 px-3 py-2 rounded-md file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+            />
+
+            <!-- Submit -->
             <button
-                id="genBtn"
-                type="submit"
-                class="w-full px-4 py-3 bg-gray-900 text-white rounded-md hover:bg-gray-800 text-base transition-colors"
+                    id="genBtn"
+                    type="submit"
+                    class="w-full px-4 py-3 bg-gray-900 text-white rounded-md hover:bg-gray-800 text-base transition-colors"
             >
                 Generate
             </button>
         </form>
+
         <p id="status" class="text-sm text-gray-500 mt-2 hidden"></p>
     </section>
 
@@ -130,6 +145,7 @@
         e.preventDefault();
 
         const userInput = input.value.trim();
+        const lastSearch = document.getElementById('lastSearchInput').value.trim();  // 👈 Add this
         if (!userInput) return;
 
         status.textContent = 'Creating… ⏳';
@@ -138,6 +154,7 @@
         try {
             const body = new FormData();
             body.append('prompt', userInput);
+            body.append('lastSearch', lastSearch);  // 👈 And add this
             [...files.files].forEach(f => body.append('files', f));
 
             const res = await fetch('/api/generate', { method: 'POST', body });
