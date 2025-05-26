@@ -1,5 +1,4 @@
 import express from "express";
-import { pool } from "../../config/database";
 import { ImagesService } from "../../services/images.service";
 import path from "path";
 import fs from "fs/promises";

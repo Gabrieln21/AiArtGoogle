@@ -6,97 +6,145 @@ import { GoogleAuth } from "google-auth-library";
 import { ImagesService } from "../../services/images.service";
 import fs from "fs";
 import path from "path";
+import { pool } from "../../config/database"; // ✅ Required for manual SQL delete
 
 const router = express.Router();
 const upload = multer({ dest: "/tmp" });
 
-// 🔗 Google Cloud setup
 const storage = new Storage();
 const bucket = storage.bucket(process.env.GCS_BUCKET!);
 
-// Serve local /images folder statically
 const imagesDir = path.join(__dirname, "../../../images");
 if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir);
 router.use("/images", express.static(imagesDir));
 
-// Vertex AI configuration
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "mom-mural-dev";
 const LOCATION = "us-central1";
 
-// Initialize Google Auth
 const auth = new GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/cloud-platform']
 });
 
 console.log(`🔧 Initialized Vertex AI for project: ${PROJECT_ID}`);
 
-async function getRecentEventsFromGemini(): Promise<string[]> {
+async function getRelevantEventFromGemini(prompt: string, lastSearch: string): Promise<string> {
     try {
-        console.log("🔍 Fetching recent events from Gemini...");
-        const prompt = "List 3 current trending topics or recent events happening in the world right now. Keep each item to one short phrase.";
+        console.log("🔍 Getting relevant 2025 issue from Gemini...");
 
-        const authClient = await auth.getClient();
-        const accessToken = await authClient.getAccessToken();
-
-        if (!accessToken.token) {
-            console.warn("⚠️ No access token available for Gemini");
-            return ["current global events", "technological advances", "environmental changes"];
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            console.log("⚠️ No Gemini API key found, using fallback");
+            return "climate change impact";
         }
 
-        // Use the newer Gemini model endpoint
-        const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-1.5-flash:generateContent`;
+        const combined = `${prompt} ${lastSearch}`.trim().slice(0, 500);
+        const input = `
+        Given the following creative input: "${combined}",
+        identify a real, widely-known global issue, environmental trend, or technological breakthrough occurring in 2025.
+        Your answer must:
+        - Be an actual, verifiable phenomenon.
+        - Be concise (3–5 words).
+        - Avoid fictional or speculative ideas like "AI-brewed tea" or vague concepts like "innovation."
+        Just return the phrase with no explanation.
+        `;
 
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
         const requestBody = {
-            contents: [{
-                role: "user",
-                parts: [{ text: prompt }]
-            }],
-            generationConfig: {
-                temperature: 0.4,
-                maxOutputTokens: 200
-            }
+            contents: [{ parts: [{ text: input }] }]
         };
 
-        console.log("📤 Sending request to Gemini API...");
         const response = await fetch(endpoint, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken.token}`,
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.warn(`⚠️ Gemini API failed: ${response.status} - ${errorText}`);
-            return ["current global events", "technological advances", "environmental changes"];
+            console.log(`⚠️ Gemini API failed: ${response.status} - ${errorText}`);
+            return "climate change impact";
         }
 
-        const result = await response.json();
-        console.log("📥 Gemini API response:", JSON.stringify(result, null, 2));
+        const data = await response.json();
+        const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
-        const content = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-        if (!content) {
-            console.warn("⚠️ No content in Gemini response");
-            return ["current global events", "technological advances", "environmental changes"];
+        if (!result || result.length > 50) {
+            console.log("⚠️ No usable Gemini result, falling back");
+            return "climate change impact";
         }
 
-        const events = content
-            .split(/\d+\.|•|-/)
-            .map((line: string) => line.trim())
-            .filter((line: string) => line.length > 5)
-            .slice(0, 3);
+        console.log("✅ Gemini selected real-world topic:", result);
+        return result;
 
-        console.log("✅ Parsed events from Gemini:", events);
-        return events.length > 0 ? events : ["current global events", "technological advances", "environmental changes"];
     } catch (error) {
-        console.warn("⚠️ Gemini news fallback due to error:", error);
-        return ["current global events", "technological advances", "environmental changes"];
+        console.log("⚠️ Gemini API error:", error);
+        return "climate change impact";
     }
 }
 
+
+
+async function rewordAfterFailureWithGemini(text: string): Promise<string> {
+    try {
+        console.log("🔍 Rewording with Gemini...");
+
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            console.log("⚠️ No Gemini API key found, using fallback event");
+            return "Failed to reword";
+        }
+
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
+
+        const prompt = `
+            Reword the following image generation prompt so that it does not fail with Vertex AI and produces a usable, creative image.
+            - Only return one single rewritten prompt.
+            - Do NOT include explanations, options, or rationale.
+            - Keep the rewritten prompt under 50 words.
+            - Avoid inappropriate, banned, or overly complex terms.
+            - Speak directly to the AI image model.
+
+            Original Prompt:
+            ${text}
+        `.trim();
+
+        const requestBody = {
+            contents: [{
+                parts: [{ text: prompt }]
+            }]
+        };
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.log(`⚠️ Gemini API failed: ${response.status} - ${errorText}`);
+            return "Failed to reword";
+        }
+
+        const data = await response.json();
+        const reworded = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+        if (!reworded) {
+            console.log("⚠️ No usable content returned from Gemini.");
+            return "Failed to reword";
+        }
+
+        console.log("✅ Gemini reworded prompt:", reworded);
+        return reworded;
+
+    } catch (error) {
+        console.log("⚠️ Gemini API error:", error);
+        return "Failed to reword";
+    }
+}
+
+
+/*
 function sanitize(text: string): string {
     return text
         .replace(/\b(kill|death|weapon|gun|knife|sword|violence|blood|gore)\b/gi, "")
@@ -115,125 +163,85 @@ function sanitize(text: string): string {
         .replace(/\s+/g, " ")
         .trim();
 }
+ */
+function sanitize(text: string): string {
+    return text
+}
 
 async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<string> {
-    console.log(`🔧 NEW PREPROCESSOR: "${raw}" with lastSearch: "${lastSearch}"`);
-
     const sanitized = sanitize(raw);
     const cleanedSearch = sanitize(lastSearch);
+    const event = await getRelevantEventFromGemini(sanitized, cleanedSearch);
 
-    console.log(`🧹 NEW Sanitized prompt: "${sanitized}"`);
-    console.log(`🧹 NEW Sanitized lastSearch: "${cleanedSearch}"`);
 
-    let finalPrompt: string;
-
-    if (cleanedSearch && cleanedSearch.length > 3) {
-        finalPrompt = `A detailed pencil drawing of ${sanitized} and ${cleanedSearch}. High contrast black and white sketch, no background.`;
-    } else {
-        finalPrompt = `A detailed pencil drawing of ${sanitized}. High contrast black and white sketch, no background.`;
-    }
-
-    console.log(`🎨 NEW Final processed prompt: "${finalPrompt}"`);
-
-    return finalPrompt;
+    // New phrasing for creativity and blending
+    return `
+        Create a surreal, high contrast pencil drawing that blends these ideas into one unified, imaginative concept:
+        1. ${sanitized}
+        2. ${cleanedSearch || "a personal search idea"}
+        3. ${event}
+        The result should be one wild visual composition where all elements fuse into a single scene or subject. No background. Hyper-focused composition.
+    `.trim().replace(/\s+/g, " "); // compact it to a clean one-line prompt
 }
 
 
-async function generateImageWithVertexAI(prompt: string, lastSearch: string): Promise<{ base64: string; localPath: string; finalPrompt: string }> {
-    const finalPrompt = await preprocessPrompt(prompt, lastSearch);
-    console.log(`🎨 Generating image for prompt: "${finalPrompt}"`);
+async function generateImageWithVertexAI(
+    prompt: string,
+    lastSearch: string,
+    retryCount = 0
+): Promise<{ base64: string; localPath: string; finalPrompt: string }> {
+    let finalPrompt = await preprocessPrompt(prompt, lastSearch);
+    console.log(`🎨 Generating image for prompt (attempt ${retryCount + 1}): "${finalPrompt}"`);
 
     const authClient = await auth.getClient();
     const accessToken = await authClient.getAccessToken();
     if (!accessToken.token) throw new Error("Failed to get access token");
 
-    // Use the working model only
-    const models = [
-        {
-            name: "imagegeneration@006",
-            endpoint: `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/imagegeneration@006:predict`
+    const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/imagegeneration@006:predict`;
+
+    const requestBody = {
+        instances: [{ prompt: finalPrompt }],
+        parameters: {
+            sampleCount: 1,
+            aspectRatio: "1:1",
+            safetyFilterLevel: "block_few",
+            personGeneration: "allow_adult"
         }
-    ];
+    };
 
-    for (const model of models) {
-        try {
-            console.log(`📤 Trying model: ${model.name}`);
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken.token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+    });
 
-            const requestBody = {
-                instances: [{
-                    prompt: finalPrompt
-                }],
-                parameters: {
-                    sampleCount: 1,
-                    aspectRatio: "1:1",
-                    safetyFilterLevel: "block_few",
-                    personGeneration: "allow_adult"
-                }
-            };
+    const data = await response.json();
+    const prediction = data.predictions?.[0];
+    const base64Image = prediction?.bytesBase64Encoded;
 
-            const response = await fetch(model.endpoint, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${accessToken.token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody)
-            });
+    if (!base64Image) {
+        console.warn(`⚠️ No image data in response. Available keys: ${prediction ? Object.keys(prediction).join(", ") : "no prediction object"}`);
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.warn(`⚠️ Model ${model.name} failed: ${response.status} - ${errorText}`);
-            } else {
-                const data = await response.json();
-                console.log(`🔍 Response from ${model.name}:`, JSON.stringify(data, null, 2));
-
-                // Check if we have predictions at all
-                if (!data.predictions || !Array.isArray(data.predictions) || data.predictions.length === 0) {
-                    console.warn(`⚠️ No predictions from ${model.name}:`, data);
-                } else {
-                    const prediction = data.predictions[0];
-                    console.log("🔍 Prediction object:", JSON.stringify(prediction, null, 2));
-
-                    // Check if prediction is empty or null
-                    if (!prediction || typeof prediction !== 'object') {
-                        console.warn(`⚠️ Invalid prediction from ${model.name}:`, prediction);
-                    } else {
-                        // Try different possible response structures for different model versions
-                        let base64Image =
-                            prediction.bytesBase64Encoded ||
-                            prediction.image?.bytesBase64Encoded ||
-                            prediction.generatedImage?.bytesBase64Encoded ||
-                            prediction.images?.[0]?.bytesBase64Encoded ||
-                            prediction.artifacts?.[0]?.base64 ||
-                            prediction.generated_images?.[0]?.bytes_base64_encoded ||
-                            prediction.encodedImage ||
-                            prediction.image ||
-                            prediction.data;
-
-                        if (base64Image) {
-                            console.log(`✅ Successfully got image from ${model.name}`);
-                            const buffer = Buffer.from(base64Image, "base64");
-                            const filename = `${uuid()}.png`;
-                            const localPath = path.join(imagesDir, filename);
-                            fs.writeFileSync(localPath, buffer);
-
-                            return { base64: base64Image, localPath, finalPrompt };
-                        } else {
-                            const availableKeys = Object.keys(prediction).join(', ');
-                            console.warn(`⚠️ No image data from ${model.name}. Available keys: ${availableKeys}`);
-                        }
-                    }
-                }
-            }
-
-        } catch (error) {
-            console.warn(`⚠️ Error with model ${model.name}:`, error);
+        if (retryCount < 2) {
+            const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
+            console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
+            return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1);
         }
+
+        throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
     }
 
-    // If we get here, all models failed
-    throw new Error("All Vertex AI models failed to generate an image. Check the console logs for details.");
+    const buffer = Buffer.from(base64Image, "base64");
+    const filename = `${uuid()}.png`;
+    const localPath = path.join(imagesDir, filename);
+    fs.writeFileSync(localPath, buffer);
+
+    return { base64: base64Image, localPath, finalPrompt };
 }
+
 
 router.post("/generate", upload.none(), async (req, res): Promise<void> => {
     try {
@@ -257,12 +265,31 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
 
         console.log(`✅ Image generated and saved: ${objectName}`);
         res.status(201).json({ ...rec, url, localPath: `/images/${objectName}` });
-        return;
     } catch (err: any) {
         console.error("❌ Image generation error:", err);
         res.status(500).json({ error: err.message || "Image generation failed" });
-        return;
     }
 });
+
+router.delete("/images/:id", async (req: express.Request, res: express.Response): Promise<void> => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+        res.status(400).json({ error: "Invalid image ID" });
+        return;
+    }
+
+    try {
+        const success = await ImagesService.remove(id);
+        if (success) {
+            res.status(200).json({ message: "Image deleted" });
+        } else {
+            res.status(404).json({ error: "Image not found" });
+        }
+    } catch (err) {
+        console.error("❌ Failed to delete image:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
 
 export default router;

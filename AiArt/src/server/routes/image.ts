@@ -9,10 +9,11 @@ const BUCKET = process.env.GCS_BUCKET!;
 
 router.get("/image/:id", async (req, res, next) => {
     try {
+        // @ts-ignore SQL dialect warning
         const { rows } = await pool.query<
             { id: number; prompt: string; gcs_path: string; model: string; created_at: Date }
         >(
-            /*sql*/ `SELECT * FROM images WHERE id = $1 LIMIT 1`,
+            `SELECT * FROM images WHERE id = $1 LIMIT 1`,
             [req.params.id]
         );
 
