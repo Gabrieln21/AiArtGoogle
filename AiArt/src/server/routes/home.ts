@@ -1,5 +1,5 @@
 import express from "express";
-import { pool } from "../../config/database";
+import { ImagesService } from "../../services/images.service";
 import path from "path";
 import fs from "fs/promises";
 
@@ -7,27 +7,23 @@ const router = express.Router();
 const BUCKET = process.env.GCS_BUCKET!;
 const localImagesPath = path.join(__dirname, "../../../images");
 
+// ---------- Home ----------
 router.get("/", async (_req, res, next): Promise<void> => {
     try {
-        // Read most recent 50 images that actually exist in local folder
-        const { rows } = await pool.query(
-            `SELECT id, prompt, gcs_path, created_at
-             FROM images
-             ORDER BY created_at DESC
-                 LIMIT 50`
-        );
+        // Use ImagesService abstraction to keep consistency
+        const rows = await ImagesService.listRecent(50);
 
         const filteredImages = await Promise.all(
             rows.map(async (r) => {
                 const fullPath = path.join(localImagesPath, r.gcs_path);
                 try {
-                    await fs.stat(fullPath); // check file exists
+                    await fs.stat(fullPath); // Confirm file exists locally
                     return {
                         ...r,
                         publicUrl: `/images/${r.gcs_path}`
                     };
                 } catch {
-                    return null;
+                    return null; // Skip if file missing
                 }
             })
         );
@@ -40,36 +36,36 @@ router.get("/", async (_req, res, next): Promise<void> => {
     }
 });
 
-// routes/archive.ts
+// ---------- Archive ----------
 router.get("/archive", async (_req, res, next) => {
     try {
-        const { rows } = await pool.query(
-            `SELECT id, prompt, gcs_path, created_at
-             FROM images
-             ORDER BY created_at DESC`
-        );
+        const rows = await ImagesService.listRecent(1000);
         const images = rows.map(r => ({
             ...r,
-            publicUrl: `https://storage.googleapis.com/${process.env.GCS_BUCKET}/${r.gcs_path}`
+            publicUrl: `https://storage.googleapis.com/${BUCKET}/${r.gcs_path}`
         }));
         res.render("archive", { title: "Archive", images });
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
-// routes/image.ts
+// ---------- Image by ID ----------
 router.get("/image/:id", async (req, res, next) => {
     try {
-        const { rows } = await pool.query(`SELECT * FROM images WHERE id = $1`, [req.params.id]);
-        if (!rows.length) return res.status(404).render("404");
-        const r = rows[0];
+        const record = await ImagesService.getById(parseInt(req.params.id, 10));
+        if (!record) return res.status(404).render("404");
+
         res.render("image", {
-            title: r.prompt.slice(0, 40),
+            title: record.prompt.slice(0, 40),
             piece: {
-                ...r,
-                publicUrl: `https://storage.googleapis.com/${process.env.GCS_BUCKET}/${r.gcs_path}`
+                ...record,
+                publicUrl: `https://storage.googleapis.com/${BUCKET}/${record.gcs_path}`
             }
         });
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 export default router;

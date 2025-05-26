@@ -9,6 +9,7 @@ const BUCKET = process.env.GCS_BUCKET!;
 
 router.get("/image/:id", async (req, res, next) => {
     try {
+        // @ts-ignore SQL dialect warning
         const { rows } = await pool.query<
             { id: number; prompt: string; gcs_path: string; model: string; created_at: Date }
         >(
