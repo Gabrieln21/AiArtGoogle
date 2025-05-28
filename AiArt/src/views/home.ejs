@@ -167,20 +167,20 @@
 
         <!-- Card Content -->
         <div class="bg-white rounded-xl overflow-hidden">
-            <!-- Image with padding + shadow -->
-            <div class="p-6 pb-0">
-                <div class="rounded-xl shadow-xl overflow-hidden bg-white">
+            <!-- Image Section: No horizontal padding -->
+            <div class="pt-6">
+                <div class="mx-auto w-fit rounded-xl shadow-xl overflow-hidden bg-white">
                     <img
                             id="modalImage"
                             src=""
                             alt=""
-                            class="w-full max-h-[70vh] object-contain rounded-xl opacity-0 transition-opacity duration-300"
+                            class="max-h-[70vh] object-contain rounded-xl opacity-0 transition-opacity duration-300"
                             onload="this.style.opacity=1"
                     />
                 </div>
             </div>
 
-            <!-- Prompt and buttons -->
+            <!-- Prompt and Buttons -->
             <div class="p-6 pt-4">
                 <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
                 <div class="mt-4 flex gap-4">
@@ -197,6 +197,7 @@
         </div>
     </div>
 </div>
+
 
 
 
