@@ -34,7 +34,16 @@
             width: 100%;
         }
 
+        /* Force override any conflicting hover styles */
+        .masonry-item img {
+            transform: none !important;
+            transition: transform 0.3s ease-out, box-shadow 0.3s ease-out !important;
+        }
 
+        .masonry-item img:hover {
+            transform: scale(1.05) !important;
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+        }
     </style>
 </head>
 
