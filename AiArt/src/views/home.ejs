@@ -97,7 +97,7 @@
                         data-url="<%= img.publicUrl %>"
                         data-prompt="<%= img.prompt %>"
                         onclick="openModal(this)"
-                        class="w-full h-full object-cover bg-gray-100 rounded hover:scale-[1.01] transition-transform duration-200 shadow-sm cursor-pointer opacity-0 transition-opacity duration-300"
+                        class="w-full h-full object-cover bg-gray-100 rounded cursor-pointer opacity-0 transition-all duration-300 ease-out hover:scale-105 hover:shadow-lg"
                         onload="this.style.opacity=1"
                 />
             </div>
@@ -140,7 +140,7 @@
 
             // Create new masonry item
             const masonryItem = document.createElement('div');
-            masonryItem.className = 'masonry-item';
+            masonryItem.className = 'aspect-[4/3] bg-gray-100 rounded overflow-hidden masonry-item';
 
             const img = document.createElement('img');
             img.src = data.localPath || data.url;
@@ -148,7 +148,7 @@
             img.dataset.url = img.src;
             img.dataset.prompt = data.prompt;
             img.onclick = () => openModal(img);
-            img.className = 'w-full rounded hover-scale shadow-sm cursor-pointer';
+            img.className = 'w-full h-full object-cover bg-gray-100 rounded cursor-pointer transition-all duration-300 ease-out hover:scale-105 hover:shadow-lg';
 
             masonryItem.appendChild(img);
             gallery.insertBefore(masonryItem, gallery.firstChild);
