@@ -1,6 +1,7 @@
 // src/server/index.ts
 import dotenv from "dotenv";
 dotenv.config();
+console.log("✅ DATABASE_URL value at runtime:", process.env.DATABASE_URL);
 import express from "express";
 import path from "path";
 import cookieParser from "cookie-parser";
@@ -20,8 +21,9 @@ import { sessionMiddleware } from "./middleware/authentication";
 
 // ✅ Set up Postgres connection directly
 const pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL as string,
+    connectionString: "postgres://mural_user:mural123@localhost:5432/mural_dev"
 });
+
 
 console.log("🔐 Session store using pool:", process.env.DATABASE_URL);
 
