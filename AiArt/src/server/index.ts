@@ -48,7 +48,12 @@ app.use((req, res, next) => {
 
         // Handle (view, options, callback)
         options = options || {};
-        options.layout = options.layout ?? "partials/_layout";
+
+        // Only set default layout if layout is not explicitly set to false
+        if (options.layout !== false) {
+            options.layout = options.layout ?? "partials/_layout";
+        }
+
         options.title = options.title ?? "Untitled";
         options.route = options.route ?? "";
 
