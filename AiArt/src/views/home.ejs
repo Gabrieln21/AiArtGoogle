@@ -47,7 +47,7 @@
 <body class="h-full bg-white text-gray-800 antialiased">
 
 <!-- ========== MAIN ========== -->
-<main class="min-h-screen pt-10 px-4">
+<main class="min-h-screen pt-10 px-4 max-w-screen-xl mx-auto">
     <!-- Form Section -->
     <section class="w-[90vw] mx-auto space-y-4">
         <h1 class="text-2xl font-semibold text-gray-900 mb-2">Participate in the art!</h1>
@@ -88,15 +88,17 @@
     <!-- Gallery Section -->
     <section id="gallery" class="masonry-grid mt-12 px-4">
         <% (images || []).forEach(img => { %>
-            <div class="masonry-item">
+            <div class="aspect-[4/3] bg-gray-100 rounded overflow-hidden masonry-item">
                 <img
+                        loading="lazy"
                         src="<%= img.publicUrl %>"
                         alt="<%= img.prompt %>"
                         data-id="<%= img.id %>"
                         data-url="<%= img.publicUrl %>"
                         data-prompt="<%= img.prompt %>"
                         onclick="openModal(this)"
-                        class="w-full rounded hover-scale shadow-sm cursor-pointer"
+                        class="w-full h-full object-cover rounded hover-scale shadow-sm cursor-pointer opacity-0 transition-opacity duration-300"
+                        onload="this.style.opacity=1"
                 />
             </div>
         <% }) %>
@@ -171,8 +173,9 @@
         <div class="relative mx-auto w-fit max-w-full overflow-hidden rounded-lg shadow-[0_12px_36px_rgba(0,0,0,0.25)] bg-gradient-to-b from-white to-white/60">
             <div class="relative isolate rounded-lg">
                 <img id="modalImage" src="" alt=""
-                     class="block max-h-[70vh] rounded-lg transition duration-300 ease-in-out mix-blend-multiply"
-                     style="object-fit: contain;" />
+                     class="block max-h-[70vh] w-full object-contain rounded-lg opacity-0 transition-opacity duration-300 ease-in-out"
+                     onload="this.style.opacity=1"
+                />
             </div>
         </div>
 
