@@ -161,32 +161,41 @@
 </script>
 
 <div id="imageModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
-    <div class="relative w-full max-w-5xl p-0 m-4 rounded-xl shadow-2xl bg-transparent overflow-hidden">
-        <button id="closeModal" class="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl font-bold z-10">&times;</button>
+    <div class="relative w-full max-w-5xl m-4 rounded-xl shadow-2xl bg-white overflow-hidden">
+        <!-- Close button -->
+        <button id="closeModal" class="absolute top-4 right-4 text-gray-500 hover:text-black text-2xl font-bold z-10">&times;</button>
 
-        <!-- Image Full-Edge, No Border -->
-        <img
-                id="modalImage"
-                src=""
-                alt=""
-                class="block w-full max-h-[80vh] object-contain opacity-0 transition-opacity duration-300 bg-black"
-                onload="this.style.opacity=1"
-        />
+        <!-- Card wrapper for image + prompt + buttons -->
+        <div class="bg-white rounded-xl overflow-hidden shadow-lg">
+            <!-- Image container -->
+            <div class="overflow-hidden rounded-t-xl bg-white">
+                <img
+                        id="modalImage"
+                        src=""
+                        alt=""
+                        class="w-full max-h-[70vh] object-contain rounded-t-xl opacity-0 transition-opacity duration-300"
+                        onload="this.style.opacity=1"
+                />
+            </div>
 
-        <!-- Prompt and Buttons -->
-        <div class="bg-white p-6">
-            <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
-            <div class="mt-4 flex gap-4">
-                <a id="downloadBtn" href="#" download
-                   class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow">⬇ Download</a>
-                <button id="deleteBtn"
-                        class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-500 shadow">
-                    🗑 Delete
-                </button>
+            <!-- Prompt and buttons -->
+            <div class="p-6">
+                <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
+                <div class="mt-4 flex gap-4">
+                    <a id="downloadBtn" href="#" download
+                       class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow">
+                        ⬇ Download
+                    </a>
+                    <button id="deleteBtn"
+                            class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-500 shadow">
+                        🗑 Delete
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
 
 
 
