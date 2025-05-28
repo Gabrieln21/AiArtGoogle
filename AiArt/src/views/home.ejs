@@ -47,16 +47,15 @@
 <body class="h-full bg-white text-gray-800 antialiased">
 
 <!-- ========== MAIN ========== -->
-<main class="min-h-screen pt-10 px-4">
-    <div class="w-full">
-    <!-- Interactive Section -->
-        <section class="mb-6 mt-0">
+<main class="min-h-screen pt-10 px-4 sm:px-6 md:px-8">
+    <div class="w-full flex justify-center">
+        <!-- Interactive Section -->
+        <section class="w-full max-w-[90vw]">
             <h1 class="text-2xl font-semibold text-gray-900 mb-2 mt-0">Participate in the art!</h1>
             <h3 class="text-lg text-gray-600 mb-8 mt-0">Explain the piece..</h3>
 
-
-            <form id="genForm" class="w-[90vw] mx-auto space-y-4" enctype="multipart/form-data">
-            <!-- Primary creative prompt -->
+            <form id="genForm" class="w-full space-y-4" enctype="multipart/form-data">
+                <!-- Primary creative prompt -->
                 <label for="promptInput" class="sr-only">Main image description</label>
                 <input
                         id="promptInput"
@@ -72,7 +71,7 @@
                         id="lastSearchInput"
                         name="lastSearch"
                         type="text"
-                        placeholder="Your last Google search "
+                        placeholder="Your last Google search"
                         class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
                 />
 
