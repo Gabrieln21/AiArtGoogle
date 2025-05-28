@@ -47,65 +47,62 @@
 <body class="h-full bg-white text-gray-800 antialiased">
 
 <!-- ========== MAIN ========== -->
-<main class="min-h-screen pt-10 px-4 sm:px-6 md:px-8">
-    <div class="w-full flex justify-center">
-        <!-- Interactive Section -->
-        <section class="w-full max-w-[90vw]">
-            <h1 class="text-2xl font-semibold text-gray-900 mb-2 mt-0">Participate in the art!</h1>
-            <h3 class="text-lg text-gray-600 mb-8 mt-0">Explain the piece..</h3>
+<main class="min-h-screen pt-10 px-4">
+    <!-- Form Section -->
+    <section class="w-[90vw] mx-auto space-y-4">
+        <h1 class="text-2xl font-semibold text-gray-900 mb-2">Participate in the art!</h1>
+        <h3 class="text-lg text-gray-600 mb-8">Explain the piece..</h3>
 
-            <form id="genForm" class="w-full space-y-4" enctype="multipart/form-data">
-                <!-- Primary creative prompt -->
-                <label for="promptInput" class="sr-only">Main image description</label>
-                <input
-                        id="promptInput"
-                        name="prompt"
-                        type="text"
-                        placeholder="Main image description…"
-                        class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
+        <form id="genForm" class="w-full space-y-4" enctype="multipart/form-data">
+            <!-- Prompt -->
+            <input
+                    id="promptInput"
+                    name="prompt"
+                    type="text"
+                    placeholder="Main image description…"
+                    class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
+            />
+
+            <!-- Last Google Search -->
+            <input
+                    id="lastSearchInput"
+                    name="lastSearch"
+                    type="text"
+                    placeholder="Your last Google search"
+                    class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
+            />
+
+            <!-- Submit -->
+            <button
+                    id="genBtn"
+                    type="submit"
+                    class="w-full px-4 py-3 bg-gray-900 text-white rounded-md hover:bg-gray-800 text-base transition-colors"
+            >
+                Generate
+            </button>
+        </form>
+
+        <p id="status" class="text-sm text-gray-500 mt-2 hidden"></p>
+    </section>
+
+    <!-- Gallery Section -->
+    <section id="gallery" class="masonry-grid mt-12 px-4">
+        <% (images || []).forEach(img => { %>
+            <div class="masonry-item">
+                <img
+                        src="<%= img.publicUrl %>"
+                        alt="<%= img.prompt %>"
+                        data-id="<%= img.id %>"
+                        data-url="<%= img.publicUrl %>"
+                        data-prompt="<%= img.prompt %>"
+                        onclick="openModal(this)"
+                        class="w-full rounded hover-scale shadow-sm cursor-pointer"
                 />
-
-                <!-- Last Google Search -->
-                <label for="lastSearchInput" class="sr-only">Your last Google search</label>
-                <input
-                        id="lastSearchInput"
-                        name="lastSearch"
-                        type="text"
-                        placeholder="Your last Google search"
-                        class="w-full border border-gray-300 px-4 py-3 rounded-md text-base focus:border-gray-500 focus:ring-0 transition-colors"
-                />
-
-                <!-- Submit -->
-                <button
-                        id="genBtn"
-                        type="submit"
-                        class="w-full px-4 py-3 bg-gray-900 text-white rounded-md hover:bg-gray-800 text-base transition-colors"
-                >
-                    Generate
-                </button>
-            </form>
-
-            <p id="status" class="text-sm text-gray-500 mt-2 hidden"></p>
-        </section>
-
-        <!-- Gallery -->
-        <section id="gallery" class="masonry-grid">
-            <% (images || []).forEach(img => { %>
-                <div class="masonry-item">
-                    <img
-                            src="<%= img.publicUrl %>"
-                            alt="<%= img.prompt %>"
-                            data-id="<%= img.id %>"
-                            data-url="<%= img.publicUrl %>"
-                            data-prompt="<%= img.prompt %>"
-                            onclick="openModal(this)"
-                            class="w-full rounded hover-scale shadow-sm cursor-pointer"
-                    />
-                </div>
-            <% }) %>
-        </section>
-    </div>
+            </div>
+        <% }) %>
+    </section>
 </main>
+
 
 
 <!-- Scripts -->
