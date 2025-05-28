@@ -1,12 +1,11 @@
 // src/config/database.ts
 import { Pool } from 'pg';
-import dotenv from 'dotenv';
-dotenv.config();
 
-console.log("🛠️ Setting up pg.Pool with connection string:", process.env.DATABASE_URL);
-
+// ✅ Hardcoded working config (skip .env for now)
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: "postgres://mural_user:mural123@localhost:5432/mural_dev"
 });
+
+console.log("🛠️ Using direct connection string for pg.Pool");
 
 export { pool };

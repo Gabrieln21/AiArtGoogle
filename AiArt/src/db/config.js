@@ -1,12 +1,8 @@
 const { Pool } = require('pg');
-require('dotenv').config();
 
+// ✅ Hardcoded working config
 const pool = new Pool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    database: process.env.DB_NAME,
+    connectionString: "postgres://mural_user:mural123@localhost:5432/mural_dev"
 });
 
 module.exports = {
