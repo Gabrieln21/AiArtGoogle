@@ -20,8 +20,9 @@ import { sessionMiddleware } from "./middleware/authentication";
 
 // ✅ Set up Postgres connection directly
 const pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_URL as string,
 });
+
 console.log("🔐 Session store using pool:", process.env.DATABASE_URL);
 
 const app = express();
