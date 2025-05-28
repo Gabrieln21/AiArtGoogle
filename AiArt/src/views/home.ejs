@@ -162,24 +162,26 @@
 
 <div id="imageModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
     <div class="relative w-full max-w-5xl m-4 rounded-xl shadow-2xl bg-white overflow-hidden">
-        <!-- Close button -->
+        <!-- Close Button -->
         <button id="closeModal" class="absolute top-4 right-4 text-gray-500 hover:text-black text-2xl font-bold z-10">&times;</button>
 
-        <!-- Card wrapper for image + prompt + buttons -->
-        <div class="bg-white rounded-xl overflow-hidden shadow-lg">
-            <!-- Image container -->
-            <div class="overflow-hidden rounded-t-xl bg-white">
-                <img
-                        id="modalImage"
-                        src=""
-                        alt=""
-                        class="w-full max-h-[70vh] object-contain rounded-t-xl opacity-0 transition-opacity duration-300"
-                        onload="this.style.opacity=1"
-                />
+        <!-- Card Content -->
+        <div class="bg-white rounded-xl overflow-hidden">
+            <!-- Image with padding + shadow -->
+            <div class="p-6 pb-0">
+                <div class="rounded-xl shadow-xl overflow-hidden bg-white">
+                    <img
+                            id="modalImage"
+                            src=""
+                            alt=""
+                            class="w-full max-h-[70vh] object-contain rounded-xl opacity-0 transition-opacity duration-300"
+                            onload="this.style.opacity=1"
+                    />
+                </div>
             </div>
 
             <!-- Prompt and buttons -->
-            <div class="p-6">
+            <div class="p-6 pt-4">
                 <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
                 <div class="mt-4 flex gap-4">
                     <a id="downloadBtn" href="#" download
@@ -195,6 +197,7 @@
         </div>
     </div>
 </div>
+
 
 
 
