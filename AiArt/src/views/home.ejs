@@ -161,24 +161,33 @@
 </script>
 
 <div id="imageModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
-    <div class="relative bg-white rounded-lg w-full max-w-3xl p-6 pt-8 shadow-2xl">
-        <button id="closeModal" class="absolute top-2 right-2 text-gray-500 hover:text-black text-xl font-bold">&times;</button>
-        <div class="relative mx-auto w-fit max-w-full overflow-hidden rounded-lg shadow-[0_12px_36px_rgba(0,0,0,0.25)] bg-gradient-to-b from-white to-white/60">
-            <div class="relative isolate rounded-lg">
-                <img id="modalImage" src="" alt=""
-                     class="block max-h-[70vh] w-full object-contain rounded-lg opacity-0 transition-opacity duration-300 ease-in-out"
-                     onload="this.style.opacity=1" />
-            </div>
+    <div class="relative max-w-5xl w-full flex flex-col items-center justify-center">
+        <button id="closeModal" class="absolute top-4 right-4 text-white hover:text-gray-300 text-3xl font-bold z-10">&times;</button>
+
+        <!-- Image Container (no white background or padding) -->
+        <div class="overflow-hidden rounded-lg max-h-[85vh] w-full bg-transparent">
+            <img id="modalImage"
+                 src=""
+                 alt=""
+                 class="block w-full h-auto max-h-[85vh] object-contain transition-opacity duration-300 opacity-0"
+                 onload="this.style.opacity=1" />
         </div>
-        <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 mt-6 italic"></p>
+
+        <!-- Prompt -->
+        <p id="modalPrompt" class="text-base leading-relaxed text-white mt-6 italic text-center px-4 max-w-3xl"></p>
+
+        <!-- Actions -->
         <div class="mt-4 flex gap-4">
             <a id="downloadBtn" href="#" download
                class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow">⬇ Download</a>
             <button id="deleteBtn"
-                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-500 shadow">🗑 Delete</button>
+                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-500 shadow">
+                🗑 Delete
+            </button>
         </div>
     </div>
 </div>
+
 
 <script>
     let currentImageId = null;
