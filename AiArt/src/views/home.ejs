@@ -270,5 +270,19 @@
 </script>
 
 <script src="https://kit.fontawesome.com/4ad52d1665.js" crossorigin="anonymous"></script>
+<script>
+    const consentCheckbox = document.getElementById('consentCheckbox');
+    const genBtn = document.getElementById('genBtn');
+
+    consentCheckbox.addEventListener('change', () => {
+        genBtn.disabled = !consentCheckbox.checked;
+    });
+
+    // Optional: Check if already checked on load (useful if you're saving state)
+    window.addEventListener('DOMContentLoaded', () => {
+        genBtn.disabled = !consentCheckbox.checked;
+    });
+</script>
+
 </body>
 </html>
