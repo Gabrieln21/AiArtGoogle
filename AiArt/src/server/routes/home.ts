@@ -30,7 +30,7 @@ router.get("/", async (_req, res, next): Promise<void> => {
 
         const images = filteredImages.filter(Boolean);
 
-        res.render("home", { title: "Home", route: "home", images });
+        res.render("home", { title: "Home", route: "home", images, layout: false });
     } catch (err) {
         next(err);
     }
