@@ -33,7 +33,6 @@
             display: inline-block;
             width: 100%;
             background-color: #f3f4f6;
-            /* Prevent layout shifts during hover */
             contain: layout style;
             transform: translateZ(0);
         }
@@ -53,21 +52,32 @@
         }
     </style>
 </head>
-
 <body class="h-full bg-white text-gray-800 antialiased">
-
 <main class="min-h-screen pt-10 px-4">
     <section class="px-4 space-y-4">
         <h1 class="text-2xl font-semibold text-gray-900 mb-2">Original Print Paradox</h1>
-        <p class="text-base text-gray-600 mb-6">
+        <p class="text-base text-gray-600">
             Welcome to Original Print Paradox. A Project by Irene Carvajal in collaboration with Gabriel Fernandez, Google Gemini and you. Our goal was to investigate the role of technology in collaboration with the human hand in the process of art making. On this page you are invited to create an image via written prompts using Google’s Gemini AI.
-            <br><br>
-            At Google’s Huddle Space you can print out your image and participate in a 2 hour printmaking workshop. With Irene’s guidance and using traditional printing techniques you will interact with the image. Upon finishing the workshop you will have at least one mono print to take with you.
-            <br><br>
-            By clicking below you are giving Irene Carvajal permission to reconfigure your image in the context of a larger installation to be shown at Google’s Huddle space. We will be announcing the dates of this exhibition soon. Participants will be given all due credit.
         </p>
 
-        <div class="flex items-center space-x-2">
+        <div class="flex gap-4 mt-2">
+            <details class="relative" data-exclusive>
+                <summary class="cursor-pointer font-medium text-gray-700 hover:text-black whitespace-nowrap">How this will be used</summary>
+                <div class="absolute left-0 top-full mt-2 w-screen max-w-4xl bg-white border border-gray-300 rounded shadow-md p-4 text-sm text-gray-700 z-10">
+                    At Google’s Huddle Space you can print out your image and participate in a 2 hour printmaking workshop. With Irene’s guidance and using traditional printing techniques you will interact with the image. Upon finishing the workshop you will have at least one mono print to take with you.
+                </div>
+            </details>
+
+            <details class="relative" data-exclusive>
+                <summary class="cursor-pointer font-medium text-gray-700 hover:text-black whitespace-nowrap">Terms of use</summary>
+                <div class="absolute left-0 top-full mt-2 w-screen max-w-4xl bg-white border border-gray-300 rounded shadow-md p-4 text-sm text-gray-700 z-10">
+                    By clicking below you are giving Irene Carvajal permission to reconfigure your image in the context of a larger installation to be shown at Google’s Huddle space. We will be announcing the dates of this exhibition soon. Participants will be given all due credit.
+                </div>
+            </details>
+        </div>
+
+
+        <div class="flex items-center space-x-2 pt-4">
             <input type="checkbox" id="consentCheckbox" class="accent-gray-900 w-5 h-5" />
             <label for="consentCheckbox" class="text-gray-700">I agree to the terms above</label>
         </div>
@@ -283,6 +293,18 @@
         genBtn.disabled = !consentCheckbox.checked;
     });
 </script>
+<script>
+    document.querySelectorAll('details[data-exclusive]').forEach(detail => {
+        detail.addEventListener('toggle', () => {
+            if (detail.open) {
+                document.querySelectorAll('details[data-exclusive]').forEach(other => {
+                    if (other !== detail) other.removeAttribute('open');
+                });
+            }
+        });
+    });
+</script>
+
 
 </body>
 </html>
