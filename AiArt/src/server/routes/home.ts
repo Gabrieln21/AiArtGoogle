@@ -4,7 +4,6 @@ import path from "path";
 import fs from "fs/promises";
 
 const router = express.Router();
-const BUCKET = process.env.GCS_BUCKET!;
 const localImagesPath = path.join(__dirname, "../../../images");
 
 // ---------- Home ----------
@@ -42,7 +41,7 @@ router.get("/archive", async (_req, res, next) => {
         const rows = await ImagesService.listRecent(1000);
         const images = rows.map(r => ({
             ...r,
-            publicUrl: `https://storage.googleapis.com/${BUCKET}/${r.gcs_path}`
+            publicUrl: `/images/${r.gcs_path}`
         }));
         res.render("archive", { title: "Archive", images });
     } catch (err) {
@@ -60,7 +59,7 @@ router.get("/image/:id", async (req, res, next) => {
             title: record.prompt.slice(0, 40),
             piece: {
                 ...record,
-                publicUrl: `https://storage.googleapis.com/${BUCKET}/${record.gcs_path}`
+                publicUrl: `/images/${record.gcs_path}`
             }
         });
     } catch (err) {

@@ -1,18 +1,14 @@
 import express from "express";
 import multer from "multer";
 import { v4 as uuid } from "uuid";
-import { Storage } from "@google-cloud/storage";
-import { GoogleAuth } from "google-auth-library";
-import { ImagesService } from "../../services/images.service";
 import fs from "fs";
 import path from "path";
+import { GoogleAuth } from "google-auth-library";
+import { ImagesService } from "../../services/images.service";
 import { pool } from "../../config/database"; // ✅ Required for manual SQL delete
 
 const router = express.Router();
 const upload = multer({ dest: "/tmp" });
-
-const storage = new Storage();
-const bucket = storage.bucket(process.env.GCS_BUCKET!);
 
 const imagesDir = path.join(__dirname, "../../../images");
 if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir);
@@ -82,8 +78,6 @@ async function getRelevantEventFromGemini(prompt: string, lastSearch: string): P
     }
 }
 
-
-
 async function rewordAfterFailureWithGemini(text: string): Promise<string> {
     try {
         console.log("🔍 Rewording with Gemini...");
@@ -143,29 +137,8 @@ async function rewordAfterFailureWithGemini(text: string): Promise<string> {
     }
 }
 
-
-/*
 function sanitize(text: string): string {
-    return text
-        .replace(/\b(kill|death|weapon|gun|knife|sword|violence|blood|gore)\b/gi, "")
-        .replace(/\b(nude|naked|sexual|explicit)\b/gi, "")
-        .replace(/\b(drug|cocaine|marijuana|alcohol)\b/gi, "")
-        .replace(/\b(hate|racist|nazi|terrorist)\b/gi, "")
-        .replace(/\briding\b/gi, "traveling on")
-        .replace(/\bworm\b/gi, "earthworm creature")
-        .replace(/\bshot\b/gi, "photograph")
-        .replace(/\bfire\b/gi, "flame")
-        .replace(/\bbomb\b/gi, "explosion")
-        .replace(/\bwar\b/gi, "conflict")
-        .replace(/\bdead\b/gi, "still")
-        .replace(/\bmurder\b/gi, "mystery")
-        .replace(/\bkilling\b/gi, "stopping")
-        .replace(/\s+/g, " ")
-        .trim();
-}
- */
-function sanitize(text: string): string {
-    return text
+    return text;
 }
 
 async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<string> {
@@ -173,17 +146,14 @@ async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<s
     const cleanedSearch = sanitize(lastSearch);
     const event = await getRelevantEventFromGemini(sanitized, cleanedSearch);
 
-
-    // New phrasing for creativity and blending
     return `
         Create a surreal, high contrast pencil drawing that blends these ideas into one unified, imaginative concept:
         1. ${sanitized}
         2. ${cleanedSearch || "a personal search idea"}
         3. ${event}
         The result should be one wild visual composition where all elements fuse into a single scene or subject. No background. Hyper-focused composition.
-    `.trim().replace(/\s+/g, " "); // compact it to a clean one-line prompt
+    `.trim().replace(/\s+/g, " ");
 }
-
 
 async function generateImageWithVertexAI(
     prompt: string,
@@ -242,7 +212,6 @@ async function generateImageWithVertexAI(
     return { base64: base64Image, localPath, finalPrompt };
 }
 
-
 router.post("/generate", upload.none(), async (req, res): Promise<void> => {
     try {
         const prompt = req.body.prompt?.trim();
@@ -253,18 +222,13 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
         }
 
         const { base64, localPath, finalPrompt } = await generateImageWithVertexAI(prompt, lastSearch);
-
-        const buffer = Buffer.from(base64, "base64");
         const objectName = path.basename(localPath);
-        const file = bucket.file(objectName);
-        await file.save(buffer, { contentType: "image/png" });
-        const [url] = await file.getSignedUrl({ action: "read", expires: Date.now() + 6.048e8 });
 
         const userId = (req.session as any)?.user?.id ?? null;
         const rec = await ImagesService.create(finalPrompt, objectName, "vertex/imagen", userId);
 
         console.log(`✅ Image generated and saved: ${objectName}`);
-        res.status(201).json({ ...rec, url, localPath: `/images/${objectName}` });
+        res.status(201).json({ ...rec, url: `/images/${objectName}`, localPath: `/images/${objectName}` });
     } catch (err: any) {
         console.error("❌ Image generation error:", err);
         res.status(500).json({ error: err.message || "Image generation failed" });
@@ -290,6 +254,5 @@ router.delete("/images/:id", async (req: express.Request, res: express.Response)
         res.status(500).json({ error: "Internal server error" });
     }
 });
-
 
 export default router;

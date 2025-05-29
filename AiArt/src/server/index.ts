@@ -16,9 +16,6 @@ import { Pool } from "pg";
 import connectPgSimple from "connect-pg-simple";
 const pgSession = connectPgSimple(session);
 
-import googleAuthRouter from "./auth/google";
-import { sessionMiddleware } from "./middleware/authentication";
-
 // ✅ Set up Postgres connection directly
 const pgPool = new Pool({
     connectionString: "postgres://mural_user:mural123@localhost:5432/mural_dev"
@@ -102,26 +99,16 @@ try {
 /* ---------- auth ---------- */
 app.use(passport.initialize());
 app.use(passport.session());
-app.use("/auth", googleAuthRouter);
 
 app.use(flash());
-app.use(sessionMiddleware);
 
 /* ---------- routes ---------- */
 import homeRouter from "./routes/home";
-import authRouter from "./routes/auth";
 import apiRouter from "./routes/api";
-import aboutRouter from "./routes/about";
-import archiveRouter from "./routes/archive";
-import contactRouter from "./routes/contact";
 import imageRouter from "./routes/image";
 
 app.use("/", homeRouter);
-app.use("/", aboutRouter);
-app.use("/", archiveRouter);
-app.use("/", contactRouter);
 app.use("/", imageRouter);
-app.use("/auth", authRouter); // keep for local-password login if used
 app.use("/api", apiRouter);
 
 /* ---------- 404 ---------- */
@@ -136,8 +123,8 @@ app.use((err: any, req: any, res: any, _next: any) => {
 });
 
 /* ---------- server ---------- */
-const PORT = parseInt(process.env.PORT || '3000', 10);
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
 
