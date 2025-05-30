@@ -147,12 +147,12 @@ async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<s
     const event = await getRelevantEventFromGemini(sanitized, cleanedSearch);
 
     return `
-        Create a surreal, high contrast pencil drawing that blends these ideas into one unified, imaginative concept:
+        Create a surreal, black and white high contrast ink drawing with no background that blends these ideas into one unified, imaginative concept:
         1. ${sanitized}
         2. ${cleanedSearch || "a personal search idea"}
         3. ${event}
         The result should be one wild visual composition where all elements fuse into a single scene or subject. No background. Hyper-focused composition.
-    `.trim().replace(/\s+/g, " ");
+    `.trim().replace(/\s+/g, " "); // compact it to a clean one-line prompt
 }
 
 async function generateImageWithVertexAI(
