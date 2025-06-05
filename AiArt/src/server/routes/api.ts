@@ -90,17 +90,7 @@ async function rewordAfterFailureWithGemini(text: string): Promise<string> {
 
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
 
-        const prompt = `
-            Reword the following image generation prompt so that it does not fail with Vertex AI and produces a usable, creative image.
-            - Only return one single rewritten prompt.
-            - Do NOT include explanations, options, or rationale.
-            - Keep the rewritten prompt under 50 words.
-            - Avoid inappropriate, banned, or overly complex terms.
-            - Speak directly to the AI image model.
-
-            Original Prompt:
-            ${text}
-        `.trim();
+        const prompt = `Reword the following image generation prompt so that it does not fail with Vertex AI and produces a usable, creative image. - Only return one single rewritten prompt. - Do NOT include explanations, options, or rationale. - Keep the rewritten prompt under 50 words. - Avoid inappropriate, banned, or overly complex terms. - Speak directly to the AI image model. - The image must be high contrast black and white only (no grayscale). Original Prompt: ${text}`;
 
         const requestBody = {
             contents: [{
@@ -146,13 +136,7 @@ async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<s
     const cleanedSearch = sanitize(lastSearch);
     const event = await getRelevantEventFromGemini(sanitized, cleanedSearch);
 
-    return `
-        Create a surreal, black and white high contrast ink drawing with no background that blends these ideas into one unified, imaginative concept:
-        1. ${sanitized}
-        2. ${cleanedSearch || "a personal search idea"}
-        3. ${event}
-        The result should be one wild visual composition where all elements fuse into a single scene or subject. No background. Hyper-focused composition.
-    `.trim().replace(/\s+/g, " "); // compact it to a clean one-line prompt
+    return `Create a surreal, high contrast black and white image (no grayscale) suitable for ink transfer. The image should blend these ideas into one unified, imaginative concept: 1. ${sanitized} 2. ${cleanedSearch || "a personal search idea"} 3. ${event} The result must be a single cohesive scene. No background. Ink-only look.`.trim().replace(/\s+/g, " ");
 }
 
 async function generateImageWithVertexAI(
