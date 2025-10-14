@@ -5,7 +5,9 @@ import fs from "fs";
 import path from "path";
 import { GoogleAuth } from "google-auth-library";
 import { ImagesService } from "../../services/images.service";
-import { pool } from "../../config/database"; // ✅ Required for manual SQL delete
+import { pool } from "../../config/database"; // for manual SQL delete
+import sharp from "sharp";
+import type { Request, Response } from "express";
 
 const router = express.Router();
 const upload = multer({ dest: "/tmp" });
@@ -78,6 +80,40 @@ async function getRelevantEventFromGemini(prompt: string, lastSearch: string): P
     }
 }
 
+async function verifyInclusionWithGemini(base64Png: string, items: string[]): Promise<boolean> {
+    // Ask Gemini Vision to caption/describe and confirm all items appear.
+    // We only send a short yes/no-like result to keep it cheap/fast.
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return true; // Skip verification if no key
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
+    const checkerPrompt = `
+Given the image, answer with ONLY "PASS" or "FAIL".
+PASS if the scene clearly includes ALL of: ${items.map(s => `"${s}"`).join(", ")}.
+FAIL if any item is missing or looks unrelated/separate/collage-like.
+    `.trim();
+
+    const requestBody = {
+        contents: [{
+            parts: [
+                { text: checkerPrompt },
+                {
+                    inline_data: {
+                        mime_type: "image/png",
+                        data: base64Png
+                    }
+                }
+            ]
+        }]
+    };
+
+    const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
+    const j = await r.json();
+    const verdict = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase();
+    return verdict === "PASS";
+}
+
+
 async function rewordAfterFailureWithGemini(text: string): Promise<string> {
     try {
         console.log("🔍 Rewording with Gemini...");
@@ -91,19 +127,12 @@ async function rewordAfterFailureWithGemini(text: string): Promise<string> {
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
 
         const prompt = `
-        Reword the following image generation prompt so that it produces a printable, creative image in Vertex AI.
-        - Only return one rewritten prompt.
-        - No explanation, no options.
-        - Under 50 words.
-        - Avoid banned or overly complex terms.
-        - Must meet all of these:
-          - Eliminate background
-          - Eliminate gray
-          - Only black and white (no grayscale)
-          - High contrast
+        Reword the following image generation prompt that failed with Vertex AI so it succeeds (Return only ONE rewritten prompt under 50 words. No explanations.)
+        
         Original Prompt:
         ${text}
         `.trim();
+
 
         const requestBody = {
             contents: [{
@@ -144,74 +173,173 @@ function sanitize(text: string): string {
     return text;
 }
 
-async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<string> {
-    const sanitized = sanitize(raw);
-    const cleanedSearch = sanitize(lastSearch);
-    const event = await getRelevantEventFromGemini(sanitized, cleanedSearch);
+async function composeCohesivePrompt(main: string, lastSearch: string, event: string): Promise<string> {
+    // Turn 3 inputs into ONE fused scene (foreground + action + setting) in ≤45 words.
+    const apiKey = process.env.GEMINI_API_KEY;
+    const combined = `${main} | ${lastSearch || "personal search idea"} | ${event}`.slice(0, 300);
 
-    return `Create a surreal, high-contrast black and white image using only pure black and pure white ink (no grayscale, no gray tones). Eliminate all background. The image must blend these ideas into one unified, imaginative subject:
-    1. ${sanitized}
-    2. ${cleanedSearch || "a personal search idea"}
-    3. ${event}
-    The result must be a single bold, ink-only visual suitable for printmaking transfer. No soft gradients. Only black and white lines or fills.`.trim().replace(/\s+/g, " ");
+    if (!apiKey) {
+        // Safe local fallback if no Gemini key
+        return `A single cohesive scene that blends ${main}, ${lastSearch || "a personal idea"}, and ${event}.`;
     }
+
+    const system = `
+You are an expert prompt-writer for Google Imagen black-and-white etching/ink style.
+Return exactly ONE sentence (< 45 words) describing a SINGLE cohesive scene (foreground/action/background)
+that naturally integrates all three elements provided. Avoid lists, quotes, and collage language.
+White background, minimal linework, no shading, no halftone.
+    `.trim();
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
+    const requestBody = {
+        contents: [{ parts: [{ text: `${system}\n\nElements: ${combined}` }] }]
+    };
+
+    const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
+    const j = await r.json();
+    return j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+        || `A single cohesive scene that blends ${main}, ${lastSearch || "a personal idea"}, and ${event}.`;
+}
+
+async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<string> {
+    const main = sanitize(raw);
+    const ls = sanitize(lastSearch);
+    const event = await getRelevantEventFromGemini(main, ls);
+
+    const fused = await composeCohesivePrompt(main, ls, event);
+
+    // Final text we hand to Imagen (short, directive, one scene).
+    return [
+        "Style: stark black-and-white line art, etching/ink pen only, white background.",
+        "No grayscale, no halftone, no gradients.",
+        `Scene: ${fused}`
+    ].join(" ");
+}
+
+
+// Convert any image buffer to pure black/white (no grayscale) for jelly-plate printing.
+async function toPureBlackWhite(
+    buffer: Buffer,
+    manualThreshold?: number // allow override with env BW_THRESHOLD
+): Promise<Buffer> {
+    // Begin in grayscale
+    const base = sharp(buffer).grayscale();
+
+    // Analyze image stats to choose a solid threshold (mean + fraction of stdev)
+    const stats = await base.stats();
+    const ch = stats.channels[0]; // luminance channel
+    const autoT = Math.round(
+        Math.max(40, Math.min(220, ch.mean + 0.5 * ch.stdev))
+    );
+    const t = Number.isFinite(manualThreshold!) ? manualThreshold! : autoT;
+
+    // Normalize dynamic range, gently sharpen edges, then binarize
+    return await base
+        .normalize()         // stretch levels (auto-contrast)
+        .sharpen(0.5, 1, 0)  // subtle edge definition without halos
+        .threshold(t)        // strictly 0 or 255 — no gray pixels
+        .toFormat("png")
+        .toBuffer();
+}
+
 
 async function generateImageWithVertexAI(
     prompt: string,
     lastSearch: string,
     retryCount = 0
 ): Promise<{ base64: string; localPath: string; finalPrompt: string }> {
-    let finalPrompt = await preprocessPrompt(prompt, lastSearch);
-    console.log(`🎨 Generating image for prompt (attempt ${retryCount + 1}): "${finalPrompt}"`);
+
+    const finalPrompt = await preprocessPrompt(prompt, lastSearch);
+    console.log(`🎨 Generating image (attempt ${retryCount + 1}): "${finalPrompt}"`);
+
+    // Choose model by env (defaults to Imagen 3 newer model).
+    // NOTE: imagegeneration@006 was deprecated/removed Sept 24, 2025 — migrate to Imagen 3+.
+    // If you still need 006 for a bit, set IMAGEN_MODEL=imagegeneration@006.
+    const MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
 
     const authClient = await auth.getClient();
     const accessToken = await authClient.getAccessToken();
     if (!accessToken.token) throw new Error("Failed to get access token");
 
-    const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/imagegeneration@006:predict`;
+    const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
+
+    // Try multiple samples and pick first that passes Gemini check
+    const sampleCount = Number(process.env.SAMPLE_COUNT || 3);
+
+    // Common parameters (modern names). See docs for fields like enhancePrompt, safetySetting, etc.
+    const parameters: Record<string, any> = {
+        sampleCount,
+        aspectRatio: "1:1",
+        personGeneration: "allow_adult",
+        // Newer API uses safetySetting, older snippets showed safetyFilterLevel.
+        safetySetting: "block_only_high",   // loosen blocks but keep guardrails
+        language: "en",
+        enhancePrompt: true                 // can set false if you see over-rewriting
+    };
+
+    // For legacy 006, we can use a negative prompt to discourage “collage / split panels”.
+    // (negativePrompt is not supported by imagen-3.0-generate-002 and newer)
+    if (MODEL.startsWith("imagegeneration@")) {
+        parameters.negativePrompt = "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
+    }
+
+    // Optional deterministic runs (requires watermark off per docs)
+    if (process.env.SEED) {
+        parameters.addWatermark = false;    // seed only works with watermark disabled
+        parameters.seed = Number(process.env.SEED);
+    }
 
     const requestBody = {
         instances: [{ prompt: finalPrompt }],
-        parameters: {
-            sampleCount: 1,
-            aspectRatio: "1:1",
-            safetyFilterLevel: "block_few",
-            personGeneration: "allow_adult"
-        }
+        parameters
     };
 
     const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken.token}`,
-            'Content-Type': 'application/json',
-        },
+        method: "POST",
+        headers: { "Authorization": `Bearer ${accessToken.token}`, "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
-    const prediction = data.predictions?.[0];
-    const base64Image = prediction?.bytesBase64Encoded;
+    const preds = Array.isArray(data.predictions) ? data.predictions : [];
+    const candidates = preds
+        .map((p: any) => p?.bytesBase64Encoded)
+        .filter((b64: any) => typeof b64 === "string" && b64.length > 0);
 
-    if (!base64Image) {
-        console.warn(`⚠️ No image data in response. Available keys: ${prediction ? Object.keys(prediction).join(", ") : "no prediction object"}`);
-
+    if (!candidates.length) {
+        console.warn("⚠️ No image data in response.", data?.error || "");
         if (retryCount < 2) {
             const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
             console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
             return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1);
         }
-
         throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
     }
 
-    const buffer = Buffer.from(base64Image, "base64");
+    // Verify inclusion of all 3 items; pick the first that passes.
+    const items = [sanitize(prompt), sanitize(lastSearch || "personal idea")];
+    // Reuse the event we just computed inside preprocessPrompt by recomputing quickly:
+    const event = await getRelevantEventFromGemini(prompt, lastSearch || "");
+    items.push(event);
+
+    let chosenBase64 = candidates[0];
+    for (const b64 of candidates) {
+        const ok = await verifyInclusionWithGemini(b64, items);
+        if (ok) { chosenBase64 = b64; break; }
+    }
+
+    // Enforce pure black/white output (no grayscale).
+    const buffer = Buffer.from(chosenBase64, "base64");
+    const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
+    const bwBuffer = await toPureBlackWhite(buffer, manualT);
+
     const filename = `${uuid()}.png`;
     const localPath = path.join(imagesDir, filename);
-    fs.writeFileSync(localPath, buffer);
+    fs.writeFileSync(localPath, bwBuffer);
 
-    return { base64: base64Image, localPath, finalPrompt };
+    return { base64: chosenBase64, localPath, finalPrompt };
 }
+
 
 router.post("/generate", upload.none(), async (req, res): Promise<void> => {
     try {
@@ -235,6 +363,40 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
         res.status(500).json({ error: err.message || "Image generation failed" });
     }
 });
+
+router.get(
+    "/preview",
+    async (req: Request, res: Response): Promise<void> => {
+        try {
+            const imgUrl = String(req.query.url || "");
+            const t = req.query.threshold ? parseInt(String(req.query.threshold), 10) : undefined;
+
+            if (!imgUrl) {
+                res.status(400).send("url required");
+                return;
+            }
+
+            // Fetch the source image (works for your own /images/... URLs)
+            const resp = await fetch(imgUrl);
+            if (!resp.ok) {
+                res.status(400).send("failed to fetch image");
+                return;
+            }
+
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const out = await toPureBlackWhite(buf, t);
+
+            res.setHeader("Content-Type", "image/png");
+            res.send(out);
+            return;
+        } catch (e: any) {
+            console.error("preview error", e);
+            res.status(500).send("error");
+            return;
+        }
+    }
+);
+
 
 router.delete("/images/:id", async (req: express.Request, res: express.Response): Promise<void> => {
     const id = parseInt(req.params.id, 10);
