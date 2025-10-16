@@ -201,20 +201,27 @@ White background, minimal linework, no shading, no halftone.
         || `A single cohesive scene that blends ${main}, ${lastSearch || "a personal idea"}, and ${event}.`;
 }
 
-async function preprocessPrompt(raw: string, lastSearch: string = ""): Promise<string> {
-    const main = sanitize(raw);
-    const ls = sanitize(lastSearch);
-    const event = await getRelevantEventFromGemini(main, ls);
+type PreprocessOut = { finalPrompt: string; fused: string; event: string };
 
+async function preprocessPrompt(
+    raw: string,
+    lastSearch: string = "",
+    eventOverride?: string
+): Promise<PreprocessOut> {
+    const main = sanitize(raw);
+    const ls = sanitize(lastSearch || "");
+    const event = eventOverride ?? await getRelevantEventFromGemini(main, ls);
     const fused = await composeCohesivePrompt(main, ls, event);
 
-    // Final text we hand to Imagen (short, directive, one scene).
-    return [
+    const finalPrompt = [
         "Style: stark black-and-white line art, etching/ink pen only, white background.",
         "No grayscale, no halftone, no gradients.",
         `Scene: ${fused}`
     ].join(" ");
+
+    return { finalPrompt, fused, event };
 }
+
 
 
 // Convert any image buffer to pure black/white (no grayscale) for jelly-plate printing.
@@ -246,57 +253,43 @@ async function toPureBlackWhite(
 async function generateImageWithVertexAI(
     prompt: string,
     lastSearch: string,
-    retryCount = 0
-): Promise<{ base64: string; localPath: string; finalPrompt: string }> {
+    retryCount = 0,
+    eventOverride?: string
+): Promise<{ base64: string; localPath: string; finalPrompt: string; event: string }> {
 
-    const finalPrompt = await preprocessPrompt(prompt, lastSearch);
+    const { finalPrompt, event } = await preprocessPrompt(prompt, lastSearch, eventOverride);
     console.log(`🎨 Generating image (attempt ${retryCount + 1}): "${finalPrompt}"`);
 
-    // Choose model by env (defaults to Imagen 3 newer model).
-    // NOTE: imagegeneration@006 was deprecated/removed Sept 24, 2025 — migrate to Imagen 3+.
-    // If you still need 006 for a bit, set IMAGEN_MODEL=imagegeneration@006.
     const MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
-
     const authClient = await auth.getClient();
     const accessToken = await authClient.getAccessToken();
     if (!accessToken.token) throw new Error("Failed to get access token");
 
     const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
-
-    // Try multiple samples and pick first that passes Gemini check
     const sampleCount = Number(process.env.SAMPLE_COUNT || 3);
 
-    // Common parameters (modern names). See docs for fields like enhancePrompt, safetySetting, etc.
     const parameters: Record<string, any> = {
         sampleCount,
         aspectRatio: "1:1",
         personGeneration: "allow_adult",
-        // Newer API uses safetySetting, older snippets showed safetyFilterLevel.
-        safetySetting: "block_only_high",   // loosen blocks but keep guardrails
+        safetySetting: "block_only_high",
         language: "en",
-        enhancePrompt: true                 // can set false if you see over-rewriting
+        enhancePrompt: true
     };
-
-    // For legacy 006, we can use a negative prompt to discourage “collage / split panels”.
-    // (negativePrompt is not supported by imagen-3.0-generate-002 and newer)
     if (MODEL.startsWith("imagegeneration@")) {
-        parameters.negativePrompt = "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
+        parameters.negativePrompt =
+            "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
     }
-
-    // Optional deterministic runs (requires watermark off per docs)
     if (process.env.SEED) {
-        parameters.addWatermark = false;    // seed only works with watermark disabled
+        parameters.addWatermark = false;
         parameters.seed = Number(process.env.SEED);
     }
 
-    const requestBody = {
-        instances: [{ prompt: finalPrompt }],
-        parameters
-    };
+    const requestBody = { instances: [{ prompt: finalPrompt }], parameters };
 
     const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${accessToken.token}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${accessToken.token}`, "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
     });
 
@@ -311,16 +304,12 @@ async function generateImageWithVertexAI(
         if (retryCount < 2) {
             const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
             console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
-            return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1);
+            return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
         }
         throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
     }
 
-    // Verify inclusion of all 3 items; pick the first that passes.
-    const items = [sanitize(prompt), sanitize(lastSearch || "personal idea")];
-    // Reuse the event we just computed inside preprocessPrompt by recomputing quickly:
-    const event = await getRelevantEventFromGemini(prompt, lastSearch || "");
-    items.push(event);
+    const items = [sanitize(prompt), sanitize(lastSearch || "personal idea"), event];
 
     let chosenBase64 = candidates[0];
     for (const b64 of candidates) {
@@ -328,7 +317,6 @@ async function generateImageWithVertexAI(
         if (ok) { chosenBase64 = b64; break; }
     }
 
-    // Enforce pure black/white output (no grayscale).
     const buffer = Buffer.from(chosenBase64, "base64");
     const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
     const bwBuffer = await toPureBlackWhite(buffer, manualT);
@@ -337,8 +325,9 @@ async function generateImageWithVertexAI(
     const localPath = path.join(imagesDir, filename);
     fs.writeFileSync(localPath, bwBuffer);
 
-    return { base64: chosenBase64, localPath, finalPrompt };
+    return { base64: chosenBase64, localPath, finalPrompt, event };
 }
+
 
 
 router.post("/generate", upload.none(), async (req, res): Promise<void> => {
@@ -350,14 +339,31 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
             return;
         }
 
-        const { base64, localPath, finalPrompt } = await generateImageWithVertexAI(prompt, lastSearch);
+        const { base64, localPath, finalPrompt, event } = await generateImageWithVertexAI(prompt, lastSearch);
         const objectName = path.basename(localPath);
 
         const userId = (req.session as any)?.user?.id ?? null;
-        const rec = await ImagesService.create(finalPrompt, objectName, "vertex/imagen", userId);
+
+        // Build the caption shown under the image (all three items, no AI fused prompt)
+        const mainText = String(req.body.prompt ?? "").trim();
+        const searchText = String(req.body.lastSearch ?? "").trim();
+        const displayCaption = [mainText, searchText, event].filter(Boolean).join(" • ");
+
+        const rec = await ImagesService.create(displayCaption, objectName, "vertex/imagen", userId);
 
         console.log(`✅ Image generated and saved: ${objectName}`);
-        res.status(201).json({ ...rec, url: `/images/${objectName}`, localPath: `/images/${objectName}` });
+        res.status(201).json({
+            ...rec,
+            url: `/images/${objectName}`,
+            localPath: `/images/${objectName}`,
+            // Explicitly include prompt for front-end convenience
+            prompt: displayCaption,
+            displayCaption,
+            inputs: { main: mainText, lastSearch: searchText, event }
+        });
+
+
+
     } catch (err: any) {
         console.error("❌ Image generation error:", err);
         res.status(500).json({ error: err.message || "Image generation failed" });
