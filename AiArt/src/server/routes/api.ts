@@ -192,11 +192,16 @@ async function composeCohesivePrompt(main: string, lastSearch: string, event: st
     }
 
     const system = `
-You are an expert prompt-writer for Google Imagen black-and-white etching/ink style.
-Return exactly ONE sentence (< 45 words) describing a SINGLE cohesive scene (foreground/action/background)
-that naturally integrates all three elements provided. Avoid lists, quotes, and collage language.
-White background, minimal linework, no shading, no halftone.
+    You are an expert prompt-writer for black-and-white ink transfers for jelly printing.
+    Return exactly ONE sentence (< 28 words) that describes a SINGLE subject doing ONE simple action.
+    HARD RULES:
+    - Plain white background, large negative space (≥60% blank).
+    - No scenery, no patterns, no textures, no text, no logos.
+    - Thick contour lines, minimal detail, no cross-hatching, no shading, no halftone.
+    - Centered composition, subject fits ~40–60% of page.
+    Avoid lists and quotes. Output the sentence only.
     `.trim();
+
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`;
     const requestBody = {
@@ -222,10 +227,13 @@ async function preprocessPrompt(
     const fused = await composeCohesivePrompt(main, ls, event);
 
     const finalPrompt = [
-        "Style: stark black-and-white line art, etching/ink pen only, white background.",
-        "No grayscale, no halftone, no gradients.",
+        "Minimal ink transfer for jelly plate.",
+        "Black-and-white line art only; thick contour lines; no shading; no halftone; no cross-hatching.",
+        "Single subject, centered; large negative space (≥60% blank); plain white background; no patterns, no textures, no text.",
+        "Subject should occupy ~40–60% of the canvas; avoid small details and busy elements.",
         `Scene: ${fused}`
     ].join(" ");
+
 
     return { finalPrompt, fused, event };
 }
@@ -282,12 +290,17 @@ async function generateImageWithVertexAI(
         personGeneration: "allow_adult",
         safetySetting: "block_only_high",
         language: "en",
-        enhancePrompt: true
+        enhancePrompt: false // keep the model from adding busy detail
     };
     if (MODEL.startsWith("imagegeneration@")) {
-        parameters.negativePrompt =
-            "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
+        parameters.negativePrompt = [
+            "busy background, clutter, multiple objects, crowd, complex scene",
+            "patterns, textures, stippling, cross-hatching, halftone, gradients, grayscale",
+            "text, captions, logos, watermarks",
+            "collage, split composition, separate panels, isolated icons"
+        ].join(", ");
     }
+
     if (process.env.SEED) {
         parameters.addWatermark = false;
         parameters.seed = Number(process.env.SEED);
