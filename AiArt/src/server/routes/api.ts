@@ -9,6 +9,13 @@ import { pool } from "../../config/database"; // for manual SQL delete
 import sharp from "sharp";
 import type { Request, Response, NextFunction } from "express";
 
+// directly after your imports in src/server/routes/api.ts
+import pLimit from "p-limit";
+
+const GEN_LIMIT = parseInt(process.env.GEN_LIMIT || "4", 10);
+// p-limit queues promises beyond the concurrency; no 429s, just waits.
+const genLimiter = pLimit(GEN_LIMIT);
+
 
 const router = express.Router();
 const upload = multer({ dest: "/tmp" });
@@ -340,7 +347,9 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
             return;
         }
 
-        const { base64, localPath, finalPrompt, event } = await generateImageWithVertexAI(prompt, lastSearch);
+        const { base64, localPath, finalPrompt, event } =
+            await genLimiter(() => generateImageWithVertexAI(prompt, lastSearch));
+
         const objectName = path.basename(localPath);
 
         const userId = (req.session as any)?.user?.id ?? null;
@@ -425,18 +434,18 @@ router.post("/print/:imageId", async (req, res): Promise<void> => {
 
         // Idempotent enqueue while a job is queued/printing for this image (requires partial unique index from migration)
         const { rows } = await pool.query(`
-          WITH ins AS (
+            WITH ins AS (
             INSERT INTO print_jobs(image_id, copies, media, requester_ip)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (image_id) WHERE (status IN ('queued','printing')) DO NOTHING
-            RETURNING *
-          )
-          SELECT * FROM ins
-          UNION ALL
-          SELECT * FROM print_jobs
-          WHERE image_id = $1 AND status IN ('queued','printing')
-          ORDER BY created_at ASC
-          LIMIT 1
+                RETURNING *
+                )
+            SELECT * FROM ins
+            UNION ALL
+            SELECT * FROM print_jobs
+            WHERE image_id = $1 AND status IN ('queued','printing')
+            ORDER BY created_at ASC
+                LIMIT 1
         `, [imageId, copies, media, ip]);
 
         res.status(201).json({ ok: true, job: rows[0] });
