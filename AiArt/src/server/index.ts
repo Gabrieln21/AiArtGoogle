@@ -103,13 +103,18 @@ app.use(passport.session());
 app.use(flash());
 
 /* ---------- routes ---------- */
+/* ---------- routes ---------- */
 import homeRouter from "./routes/home";
 import apiRouter from "./routes/api";
 import imageRouter from "./routes/image";
 
+// Mount /api FIRST so its routes are definitively matched
+app.use("/api", apiRouter);
+
+// Then mount the site routers
 app.use("/", homeRouter);
 app.use("/", imageRouter);
-app.use("/api", apiRouter);
+
 
 /* ---------- 404 ---------- */
 app.use((_req, _res, next) => next(createError(404)));

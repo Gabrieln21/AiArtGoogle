@@ -15,6 +15,7 @@
     "start:dev": "concurrently \"npm run server:dev\" \"npm run build:dev\"",
     "migrate": "node src/scripts/migrate.js",
     "lint": "prettier --write \"src/**/*.{ts,js,json,css,scss,md}\"",
+    "migrate:print": "node scripts/migrate_print_jobs.js",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],

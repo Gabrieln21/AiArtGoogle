@@ -7,7 +7,8 @@ import { GoogleAuth } from "google-auth-library";
 import { ImagesService } from "../../services/images.service";
 import { pool } from "../../config/database"; // for manual SQL delete
 import sharp from "sharp";
-import type { Request, Response } from "express";
+import type { Request, Response, NextFunction } from "express";
+
 
 const router = express.Router();
 const upload = multer({ dest: "/tmp" });
@@ -403,6 +404,48 @@ router.get(
     }
 );
 
+// Users click “Request Print” in the modal -> enqueue (idempotent while inflight)
+router.post("/print/:imageId", async (req, res): Promise<void> => {
+    try {
+        const imageId = parseInt(req.params.imageId, 10);
+        if (Number.isNaN(imageId)) {
+            res.status(400).json({ error: "invalid image id" }); return;
+        }
+
+        const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+            || req.socket.remoteAddress || null;
+        const copies = Math.max(1, Math.min(5, parseInt(String(req.body?.copies ?? "1"), 10) || 1));
+        const media  = String(req.body?.media ?? process.env.PRINT_MEDIA ?? "Letter");
+
+        // Ensure image exists (optional safety)
+        const { rows: imgRows } = await pool.query(
+            "SELECT id FROM images WHERE id = $1 LIMIT 1", [imageId]
+        );
+        if (imgRows.length === 0) { res.status(404).json({ error: "image not found" }); return; }
+
+        // Idempotent enqueue while a job is queued/printing for this image (requires partial unique index from migration)
+        const { rows } = await pool.query(`
+          WITH ins AS (
+            INSERT INTO print_jobs(image_id, copies, media, requester_ip)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (image_id) WHERE (status IN ('queued','printing')) DO NOTHING
+            RETURNING *
+          )
+          SELECT * FROM ins
+          UNION ALL
+          SELECT * FROM print_jobs
+          WHERE image_id = $1 AND status IN ('queued','printing')
+          ORDER BY created_at ASC
+          LIMIT 1
+        `, [imageId, copies, media, ip]);
+
+        res.status(201).json({ ok: true, job: rows[0] });
+    } catch (e:any) {
+        console.error("enqueue error", e);
+        res.status(500).json({ error: e.message || "failed to enqueue" });
+    }
+});
+
 
 router.delete("/images/:id", async (req: express.Request, res: express.Response): Promise<void> => {
     const id = parseInt(req.params.id, 10);
@@ -423,5 +466,83 @@ router.delete("/images/:id", async (req: express.Request, res: express.Response)
         res.status(500).json({ error: "Internal server error" });
     }
 });
+
+// --- Simple admin gate (set ADMIN_KEY in env) ---
+function adminGate(req: express.Request, res: express.Response, next: NextFunction) {
+    const key = (req.header('x-admin-key') || String(req.query.key || '')).trim();
+    if (!process.env.ADMIN_KEY || key === process.env.ADMIN_KEY) return next();
+    res.status(401).send('Unauthorized');
+}
+
+// --- Admin: Print Queue ---
+// --- Admin: Print Queue ---
+router.get('/admin/prints', adminGate, async (req, res) => {
+    const { rows } = await pool.query(`
+        SELECT
+            pj.id,
+            pj.status,
+            pj.copies,
+            pj.media,
+            pj.created_at,
+            pj.started_at,
+            pj.finished_at,
+            pj.error,
+            i.id                AS image_id,
+            i.prompt            AS caption,
+            i.gcs_path,
+            ('/images/' || i.gcs_path) AS public_url
+        FROM print_jobs pj
+                 JOIN images i ON i.id = pj.image_id
+        ORDER BY
+            CASE pj.status
+                WHEN 'queued'   THEN 0
+                WHEN 'printing' THEN 1
+                WHEN 'error'    THEN 2
+                WHEN 'done'     THEN 3
+                ELSE 4
+                END,
+            pj.created_at ASC
+    `);
+
+    const adminKey = String(req.query.key || req.header('x-admin-key') || '');
+
+    res.render('admin_prints', {
+        jobs: rows,
+        layout: 'partials/_layout',
+        title: 'Print Queue',
+        route: '',
+        adminKey
+    });
+});
+
+
+router.post('/admin/prints/:id/done', adminGate, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await pool.query(
+        "UPDATE print_jobs SET status='done', finished_at=now(), error=NULL WHERE id=$1",
+        [id]
+    );
+    // stay under /api and preserve ?key=...
+    res.redirect(`/api/admin/prints?key=${encodeURIComponent(String(req.query.key || ''))}`);
+});
+
+router.post('/admin/prints/:id/requeue', adminGate, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await pool.query(
+        "UPDATE print_jobs SET status='queued', started_at=NULL, worker_id=NULL, error=NULL WHERE id=$1",
+        [id]
+    );
+    // stay under /api and preserve ?key=...
+    res.redirect(`/api/admin/prints?key=${encodeURIComponent(String(req.query.key || ''))}`);
+});
+
+router.post('/admin/prints/:id/delete', adminGate, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await pool.query("DELETE FROM print_jobs WHERE id=$1", [id]);
+    // stay under /api and preserve ?key=...
+    res.redirect(`/api/admin/prints?key=${encodeURIComponent(String(req.query.key || ''))}`);
+});
+
+
 
 export default router;

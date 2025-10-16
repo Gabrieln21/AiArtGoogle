@@ -161,7 +161,9 @@
             const img = document.createElement('img');
             img.src = data.localPath || data.url;
             img.alt = caption;
-            img.dataset.id = data.id ?? '';
+            const newId = (data && (data.id ?? data.image_id ?? data.imageId ?? (data.image && data.image.id))) || '';
+            img.dataset.id = String(newId);
+
             img.dataset.url = img.src;
             img.dataset.prompt = caption;
             img.onclick = () => openModal(img);
@@ -217,6 +219,10 @@
                        class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow">
                         ⬇ Download
                     </a>
+                    <button id="printBtn" type="button"
+                            class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded hover:bg-gray-800 shadow">
+                        🖨 Request print
+                    </button>
                 </div>
             </div>
         </div>
@@ -265,6 +271,38 @@
         if (e.key === "Escape") closeModal();
     });
 
+</script>
+<script>
+    // Now the DOM contains #printBtn, so we can safely bind.
+    (function attachPrintHandler() {
+        const printBtn = document.getElementById('printBtn');
+        if (!printBtn) return; // defensive
+
+        printBtn.addEventListener('click', async () => {
+            if (!currentImageId) return;
+
+            printBtn.disabled = true;
+            const old = printBtn.textContent;
+            printBtn.textContent = 'Queuing…';
+
+            try {
+                const res = await fetch(`/api/print/${currentImageId}`, { method: 'POST' });
+                if (!res.ok) {
+                    const t = await res.text();
+                    printBtn.textContent = 'Failed';
+                    setTimeout(() => { printBtn.textContent = old; printBtn.disabled = false; }, 1500);
+                    console.error(t);
+                    return;
+                }
+                printBtn.textContent = 'Queued!';
+                setTimeout(() => { printBtn.textContent = '🖨 Request print'; printBtn.disabled = false; }, 2000);
+            } catch (e) {
+                console.error(e);
+                printBtn.textContent = 'Error';
+                setTimeout(() => { printBtn.textContent = old; printBtn.disabled = false; }, 1500);
+            }
+        });
+    })();
 </script>
 
 <script src="https://kit.fontawesome.com/4ad52d1665.js" crossorigin="anonymous"></script>
