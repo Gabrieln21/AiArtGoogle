@@ -7,10 +7,100 @@ import { GoogleAuth } from "google-auth-library";
 import { ImagesService } from "../../services/images.service";
 import { pool } from "../../config/database"; // for manual SQL delete
 import sharp from "sharp";
-import type { Request, Response, NextFunction } from "express";
+import type {
+    Request as ExpressRequest,
+    Response as ExpressResponse,
+    NextFunction
+} from "express";
 
 // directly after your imports in src/server/routes/api.ts
 import pLimit from "p-limit";
+
+// --- Global generation tokens (DB-backed) to cap cross-process concurrency ---
+const GEN_TOKENS_TIMEOUT_SEC = parseInt(process.env.GEN_TOKENS_TIMEOUT_SEC || "120", 10); // reclaim stuck > 120s
+
+async function claimGenToken(worker: string): Promise<number> {
+    const sql = `
+    WITH c AS (
+      SELECT id
+      FROM gen_tokens
+      WHERE in_use = false
+         OR (in_use = true AND taken_at < now() - interval '${GEN_TOKENS_TIMEOUT_SEC} seconds')
+      ORDER BY id
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    )
+    UPDATE gen_tokens g
+      SET in_use = true, taken_by = $1, taken_at = now()
+    FROM c
+    WHERE g.id = c.id
+    RETURNING g.id;
+  `;
+    const { rows } = await pool.query(sql, [worker]);
+    if (!rows.length) throw new Error("no-generation-token-available");
+    return rows[0].id as number;
+}
+
+async function releaseGenToken(id: number): Promise<void> {
+    await pool.query(
+        "UPDATE gen_tokens SET in_use=false, taken_by=NULL, taken_at=NULL WHERE id=$1",
+        [id]
+    );
+}
+
+// --- Generic exponential backoff with jitter for transient failures ---
+async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+function isTransientStatus(status: number) {
+    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+function looksTransientErrorBody(body: any): boolean {
+    const s = typeof body === "string" ? body : JSON.stringify(body || {});
+    return /quota|rate|exceed|throttle|temporar|backend|unavailable|timeout/i.test(s);
+}
+
+async function fetchJSONWithBackoff(
+    url: string,
+    init: globalThis.RequestInit,
+    opts: { tries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<{ ok: boolean; status: number; json: any }> {
+    const tries = opts.tries ?? 5;
+    const base = opts.baseDelayMs ?? 350;
+    const maxD  = opts.maxDelayMs ?? 4000;
+
+    for (let i = 0; i < tries; i++) {
+        let resp: globalThis.Response | null = null;
+        try {
+            // 60s timeout per call
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 60_000);
+            resp = await fetch(url, { ...init, signal: ctrl.signal });
+            clearTimeout(t);
+
+            const textBody = await resp.text();
+            const json = textBody ? JSON.parse(textBody) : {};
+            if (resp.ok) return { ok: true, status: resp.status, json };
+
+            const transient = isTransientStatus(resp.status) || looksTransientErrorBody(json);
+            if (!transient || i === tries - 1) return { ok: false, status: resp.status, json };
+
+            const delay = Math.min(maxD, base * (2 ** i)) + Math.floor(Math.random() * 200);
+            await sleep(delay);
+            continue;
+        } catch (err: any) {
+            const isAbort = String(err?.name || "").toLowerCase().includes("abort");
+            const lastTry = i === tries - 1;
+            const delay   = Math.min(maxD, base * (2 ** i)) + Math.floor(Math.random() * 200);
+            if (isAbort && !lastTry) { await sleep(delay); continue; }
+            if (lastTry) throw err;
+            await sleep(delay);
+        }
+    }
+
+    return { ok: false, status: 0, json: { error: "exhausted-retries" } };
+}
+
+
 
 const GEN_LIMIT = parseInt(process.env.GEN_LIMIT || "4", 10);
 // p-limit queues promises beyond the concurrency; no 429s, just waits.
@@ -275,68 +365,104 @@ async function generateImageWithVertexAI(
     const accessToken = await authClient.getAccessToken();
     if (!accessToken.token) throw new Error("Failed to get access token");
 
-    const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
-    const sampleCount = Number(process.env.SAMPLE_COUNT || 3);
+    // Acquire a global token to limit cross-process concurrency (released in finally)
+    const tokenId = await claimGenToken(`api:${process.pid}`);
+    try {
+        const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
 
-    const parameters: Record<string, any> = {
-        sampleCount,
-        aspectRatio: "1:1",
-        personGeneration: "allow_adult",
-        safetySetting: "block_only_high",
-        language: "en",
-        enhancePrompt: true
-    };
-    if (MODEL.startsWith("imagegeneration@")) {
-        parameters.negativePrompt =
-            "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
-    }
-    if (process.env.SEED) {
-        parameters.addWatermark = false;
-        parameters.seed = Number(process.env.SEED);
-    }
+        // Default sampleCount, but shed load under pressure
+        const defaultSamples = Number(process.env.SAMPLE_COUNT || 3);
+        const pending = (genLimiter as any).pendingCount ?? 0;
+        const active  = (genLimiter as any).activeCount  ?? 0;
+        const sampleCount = (pending + active) > 2 ? 1 : defaultSamples;
 
-    const requestBody = { instances: [{ prompt: finalPrompt }], parameters };
-
-    const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody)
-    });
-
-    const data = await response.json();
-    const preds = Array.isArray(data.predictions) ? data.predictions : [];
-    const candidates = preds
-        .map((p: any) => p?.bytesBase64Encoded)
-        .filter((b64: any) => typeof b64 === "string" && b64.length > 0);
-
-    if (!candidates.length) {
-        console.warn("⚠️ No image data in response.", data?.error || "");
-        if (retryCount < 2) {
-            const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
-            console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
-            return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+        const parameters: Record<string, any> = {
+            sampleCount,
+            aspectRatio: "1:1",
+            personGeneration: "allow_adult",
+            safetySetting: "block_only_high",
+            language: "en",
+            enhancePrompt: true
+        };
+        if (MODEL.startsWith("imagegeneration@")) {
+            parameters.negativePrompt =
+                "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
         }
-        throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
+        if (process.env.SEED) {
+            parameters.addWatermark = false;
+            parameters.seed = Number(process.env.SEED);
+        }
+
+        const requestBody = { instances: [{ prompt: finalPrompt }], parameters };
+
+        const { ok, status, json } = await fetchJSONWithBackoff(endpoint, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken.token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(requestBody)
+        }, { tries: 5, baseDelayMs: 400, maxDelayMs: 5000 });
+
+        if (!ok) {
+            // If the backend signaled transient issues, let the outer retry loop handle it
+            console.warn(`Vertex call failed (status=${status})`, json?.error || json);
+            if (retryCount < 2) {
+                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
+                console.log("🔁 Retrying with reworded prompt (after HTTP failure):", rewordedPrompt);
+                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+            }
+            throw new Error(`Vertex predict failed (status=${status})`);
+        }
+
+        const data = json;
+        const preds = Array.isArray(data.predictions) ? data.predictions : [];
+        const candidates = preds
+            .map((p: any) => p?.bytesBase64Encoded)
+            .filter((b64: any) => typeof b64 === "string" && b64.length > 0);
+
+        if (!candidates.length) {
+            console.warn("⚠️ No image data in response body.", data?.error || "");
+            if (retryCount < 2) {
+                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
+                console.log("🔁 Retrying with reworded prompt (no predictions):", rewordedPrompt);
+                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+            }
+            throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
+        }
+
+        if (!candidates.length) {
+            console.warn("⚠️ No image data in response.", data?.error || "");
+            if (retryCount < 2) {
+                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
+                console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
+                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+            }
+            throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
+        }
+
+        const items = [sanitize(prompt), sanitize(lastSearch || "personal idea"), event];
+
+        let chosenBase64 = candidates[0];
+        for (const b64 of candidates) {
+            const ok = await verifyInclusionWithGemini(b64, items);
+            if (ok) { chosenBase64 = b64; break; }
+        }
+
+        const buffer = Buffer.from(chosenBase64, "base64");
+        const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
+        const bwBuffer = await toPureBlackWhite(buffer, manualT);
+
+        const filename = `${uuid()}.png`;
+        const localPath = path.join(imagesDir, filename);
+        fs.writeFileSync(localPath, bwBuffer);
+
+        return { base64: chosenBase64, localPath, finalPrompt, event };
+    } finally {
+        try { await releaseGenToken(tokenId); } catch {}
     }
-
-    const items = [sanitize(prompt), sanitize(lastSearch || "personal idea"), event];
-
-    let chosenBase64 = candidates[0];
-    for (const b64 of candidates) {
-        const ok = await verifyInclusionWithGemini(b64, items);
-        if (ok) { chosenBase64 = b64; break; }
-    }
-
-    const buffer = Buffer.from(chosenBase64, "base64");
-    const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
-    const bwBuffer = await toPureBlackWhite(buffer, manualT);
-
-    const filename = `${uuid()}.png`;
-    const localPath = path.join(imagesDir, filename);
-    fs.writeFileSync(localPath, bwBuffer);
-
-    return { base64: chosenBase64, localPath, finalPrompt, event };
 }
+
 
 
 
@@ -384,9 +510,10 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
 
 router.get(
     "/preview",
-    async (req: Request, res: Response): Promise<void> => {
+    async (req: ExpressRequest, res: ExpressResponse): Promise<void> => {
         try {
             const imgUrl = String(req.query.url || "");
+
             const t = req.query.threshold ? parseInt(String(req.query.threshold), 10) : undefined;
 
             if (!imgUrl) {
