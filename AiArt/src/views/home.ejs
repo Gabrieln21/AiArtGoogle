@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <title>Irene Carvajal – Art & Experiments</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
     <!-- Tailwind CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,20 +13,15 @@
     <style>
         body { font-family: Inter, sans-serif; }
 
+        /* Masonry grid stays CSS-column based (lightweight & responsive) */
         .masonry-grid {
             column-count: 4;
             column-gap: 20px;
             column-fill: balance;
         }
-        @media (max-width: 1280px) {
-            .masonry-grid { column-count: 3; }
-        }
-        @media (max-width: 1024px) {
-            .masonry-grid { column-count: 2; }
-        }
-        @media (max-width: 640px) {
-            .masonry-grid { column-count: 1; }
-        }
+        @media (max-width: 1280px) { .masonry-grid { column-count: 3; } }
+        @media (max-width: 1024px) { .masonry-grid { column-count: 2; } }
+        @media (max-width: 640px)  { .masonry-grid { column-count: 1; } }
 
         .masonry-item {
             break-inside: avoid;
@@ -33,7 +29,7 @@
             display: inline-block;
             width: 100%;
             background-color: #f3f4f6;
-            contain: layout style;
+            contain: layout paint style; /* slightly stronger containment */
             transform: translateZ(0);
         }
 
@@ -41,14 +37,34 @@
             will-change: transform, opacity;
             backface-visibility: hidden;
             transform: translateZ(0);
-            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transition: transform .3s ease, filter .3s ease, opacity .3s ease;
             filter: brightness(1) contrast(1);
         }
-
         .gallery-img:hover {
             transform: translateY(-2px) scale(1.015);
-            filter: brightness(1.05) contrast(1.1);
+            filter: brightness(1.05) contrast(1.08);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        /* On touch devices, don’t rely on hover flourishes */
+        @media (hover: none) {
+            .gallery-img:hover { transform:none; filter:none; box-shadow:none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .gallery-img { transition: none; }
+        }
+
+        /* Details popovers: static on mobile, floating panel on large screens */
+        .details-panel {
+            width: 100%;
+        }
+        @media (min-width: 1024px) {
+            .details-panel {
+                position: absolute;
+                left: 0;
+                top: 100%;
+                width: 48rem; /* ~max-w-4xl */
+            }
         }
     </style>
 </head>
@@ -56,26 +72,26 @@
 <main class="min-h-screen pt-10 px-4">
     <section class="px-4 space-y-4">
         <h1 class="text-2xl font-semibold text-gray-900 mb-2">Original Print Paradox</h1>
-        <p class="text-base text-gray-600">
-            Welcome to Original Print Paradox. A Project by Irene Carvajal in collaboration with Gabriel Fernandez, Google Gemini and you. Our goal was to investigate the role of technology in collaboration with the human hand in the process of art making. On this page you are invited to create an image via written prompts using Google’s Gemini AI.
-        </p>
 
-        <div class="flex gap-4 mt-2">
-            <details class="relative" data-exclusive>
-                <summary class="cursor-pointer font-medium text-gray-700 hover:text-black whitespace-nowrap">How this will be used</summary>
-                <div class="absolute left-0 top-full mt-2 w-screen max-w-4xl bg-white border border-gray-300 rounded shadow-md p-4 text-sm text-gray-700 z-10">
+        <div class="flex flex-wrap gap-3 mt-2">
+            <details class="relative inline-block" data-exclusive>
+                <summary class="cursor-pointer inline-flex items-center gap-2 px-2 py-1 rounded-md text-gray-700 hover:bg-gray-100">
+                    How this will be used
+                </summary>
+                <div class="details-panel mt-2 lg:mt-2 bg-white border border-gray-300 rounded lg:shadow-md p-4 text-sm text-gray-700 z-10">
                     At Google’s Huddle Space you can print out your image and participate in a 2 hour printmaking workshop. With Irene’s guidance and using traditional printing techniques you will interact with the image. Upon finishing the workshop you will have at least one mono print to take with you.
                 </div>
             </details>
 
-            <details class="relative" data-exclusive>
-                <summary class="cursor-pointer font-medium text-gray-700 hover:text-black whitespace-nowrap">Terms of use</summary>
-                <div class="absolute left-0 top-full mt-2 w-screen max-w-4xl bg-white border border-gray-300 rounded shadow-md p-4 text-sm text-gray-700 z-10">
+            <details class="relative inline-block" data-exclusive>
+                <summary class="cursor-pointer inline-flex items-center gap-2 px-2 py-1 rounded-md text-gray-700 hover:bg-gray-100">
+                    Terms of use
+                </summary>
+                <div class="details-panel mt-2 lg:mt-2 bg-white border border-gray-300 rounded lg:shadow-md p-4 text-sm text-gray-700 z-10">
                     By clicking below you are giving Irene Carvajal permission to reconfigure your image in the context of a larger installation to be shown at Google’s Huddle space. We will be announcing the dates of this exhibition soon. Participants will be given all due credit.
                 </div>
             </details>
         </div>
-
 
         <div class="flex items-center space-x-2 pt-4">
             <input type="checkbox" id="consentCheckbox" class="accent-gray-900 w-5 h-5" />
@@ -101,13 +117,15 @@
             <div class="aspect-[4/3] rounded overflow-hidden masonry-item">
                 <img
                         loading="lazy"
+                        decoding="async"
+                        sizes="(max-width:640px) 100vw, (max-width:1024px) 50vw, (max-width:1280px) 33vw, 25vw"
                         src="<%= img.publicUrl %>"
                         alt="<%= img.prompt %>"
                         data-id="<%= img.id %>"
                         data-url="<%= img.publicUrl %>"
                         data-prompt="<%= img.prompt %>"
                         onclick="openModal(this)"
-                        class="gallery-img w-full h-full object-cover rounded cursor-pointer opacity-0 transition-opacity duration-500 ease-in-out"
+                        class="gallery-img w-full h-full object-cover rounded cursor-pointer opacity-0 transition-opacity duration-300 ease-in-out"
                 />
             </div>
         <% }) %>
@@ -191,49 +209,52 @@
     });
 </script>
 
-<div id="imageModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
-    <div class="relative w-full max-w-5xl m-4 rounded-xl shadow-2xl bg-white overflow-hidden">
-        <!-- Close Button -->
-        <button id="closeModal" class="absolute top-4 right-4 text-gray-500 hover:text-black text-2xl font-bold z-10">&times;</button>
+<div id="imageModal" class="fixed inset-0 bg-black/80 z-50 hidden">
+    <div class="w-full h-full p-4 sm:p-6 md:p-8 flex items-center justify-center">
+        <!-- remove overflow-hidden here so inner padding is visible -->
+        <div class="relative w-full max-w-5xl rounded-2xl shadow-2xl bg-white">
+            <!-- Close Button (larger tap target) -->
+            <button id="closeModal" aria-label="Close"
+                    class="absolute top-4 right-4 h-10 w-10 grid place-items-center rounded-full bg-white/80 text-gray-700 hover:text-black shadow">
+                &times;
+            </button>
 
-        <!-- Card Content -->
-        <div class="bg-white rounded-xl overflow-hidden">
-            <!-- Image Section: No horizontal padding -->
-            <div class="pt-6">
-                <div class="mx-auto w-fit rounded-xl shadow-xl overflow-hidden bg-white">
-                    <img
-                            id="modalImage"
-                            src=""
-                            alt=""
-                            class="max-h-[70vh] object-contain rounded-xl opacity-0 transition-opacity duration-300"
-                            onload="this.style.opacity=1"
-                    />
+            <!-- Padded content wrapper -->
+            <div class="bg-white rounded-2xl">
+                <!-- Image area: center + hard max width so it never hugs the card edges -->
+                <div class="px-3 pt-3 sm:px-6 sm:pt-6">
+                    <!-- Centered container that limits the image width -->
+                    <div class="mx-auto w-full max-w-[720px]">
+                        <img
+                                id="modalImage"
+                                src=""
+                                alt=""
+                                decoding="async"
+                                sizes="(max-width:640px) 92vw, 720px"
+                                class="block w-full h-auto max-h-[72dvh] object-contain rounded-lg opacity-0 transition-opacity duration-300"
+                                onload="this.style.opacity=1"
+                        />
+                    </div>
                 </div>
-            </div>
 
-            <!-- Prompt and Buttons -->
-            <div class="p-6 pt-4">
-                <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
-                <div class="mt-4 flex gap-4">
-                    <a id="downloadBtn" href="#" download
-                       class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow">
-                        ⬇ Download
-                    </a>
-                    <button id="printBtn" type="button"
-                            class="inline-block px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded hover:bg-gray-800 shadow">
-                        🖨 Request print
-                    </button>
+                <!-- Caption + buttons -->
+                <div class="p-4 sm:p-6 pt-4 pb-6 sm:pb-6">
+                    <p id="modalPrompt" class="text-base leading-relaxed text-gray-700 italic"></p>
+                    <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                        <a id="downloadBtn" href="#" download
+                           class="inline-block px-4 py-3 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 shadow text-center">
+                            ⬇ Download
+                        </a>
+                        <button id="printBtn" type="button"
+                                class="inline-block px-4 py-3 text-sm font-medium text-white bg-gray-900 rounded hover:bg-gray-800 shadow">
+                            🖨 Request print
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
-
-
-
-
-
-
 
 <script>
     let currentImageId = null;
