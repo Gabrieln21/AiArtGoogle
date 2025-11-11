@@ -47,6 +47,28 @@ async function releaseGenToken(id: number): Promise<void> {
         [id]
     );
 }
+// ---- polite waiter over the DB token pool (cross-process safe) ----
+const GEN_TOKENS_MAX_WAIT_MS = parseInt(process.env.GEN_TOKENS_MAX_WAIT_MS || "60000", 10);
+const GEN_TOKENS_POLL_MS     = parseInt(process.env.GEN_TOKENS_POLL_MS || "150", 10);
+
+async function claimGenTokenOrWait(worker: string): Promise<number> {
+    const start = Date.now();
+    while (true) {
+        try {
+            return await claimGenToken(worker); // success, got an id
+        } catch (e: any) {
+            // Only wait on the "no token" case; rethrow other errors
+            if (String(e?.message) !== "no-generation-token-available") throw e;
+
+            const elapsed = Date.now() - start;
+            if (elapsed >= GEN_TOKENS_MAX_WAIT_MS) {
+                throw new Error("no-generation-token-available-timeout");
+            }
+            // small jitter to avoid thundering herd
+            await sleep(GEN_TOKENS_POLL_MS + Math.floor(Math.random() * GEN_TOKENS_POLL_MS));
+        }
+    }
+}
 
 // --- Generic exponential backoff with jitter for transient failures ---
 async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -56,8 +78,10 @@ function isTransientStatus(status: number) {
 }
 function looksTransientErrorBody(body: any): boolean {
     const s = typeof body === "string" ? body : JSON.stringify(body || {});
-    return /quota|rate|exceed|throttle|temporar|backend|unavailable|timeout/i.test(s);
+    // include common Vertex messages and HTTP reasons
+    return /quota|rate|exceed|throttle|temporar|backend|unavailable|timeout|RESOURCE_EXHAUSTED/i.test(s);
 }
+
 
 async function fetchJSONWithBackoff(
     url: string,
@@ -100,11 +124,66 @@ async function fetchJSONWithBackoff(
     return { ok: false, status: 0, json: { error: "exhausted-retries" } };
 }
 
+async function predictVertexOnce(
+    model: string,
+    accessToken: string,
+    location: string,
+    projectId: string,
+    prompt: string,
+    sampleCount: number
+): Promise<{ ok: boolean; status: number; json: any }> {
+    const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
+
+    // Build parameters per model family.  imagegeneration@005 rejects RAI fields -> keep minimal.
+    const isImagen3 = model.startsWith("imagen-3");
+    const isImageGen005 = model.startsWith("imagegeneration@");
+
+    let parameters: Record<string, any> = {
+        sampleCount,
+        aspectRatio: "1:1"
+    };
+
+    if (isImagen3) {
+        // These were working (429 = quota, not schema), keep them for Imagen 3.
+        parameters.personGeneration = "allow_adult";
+        parameters.safetySetting = "block_only_high";
+        parameters.language = "en";
+        parameters.enhancePrompt = true;
+    }
+
+    if (isImageGen005) {
+        // DO NOT send RAI/safety/person params to v005 – they trigger "Invalid rai level".
+        parameters.negativePrompt =
+            "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
+    }
+
+
+    return await fetchJSONWithBackoff(
+        endpoint,
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ instances: [{ prompt }], parameters })
+        },
+        { tries: 5, baseDelayMs: 400, maxDelayMs: 5000 }
+    );
+}
 
 
 const GEN_LIMIT = parseInt(process.env.GEN_LIMIT || "4", 10);
 // p-limit queues promises beyond the concurrency; no 429s, just waits.
 const genLimiter = pLimit(GEN_LIMIT);
+
+// --- Per-model 429 cooldown to avoid hammering a saturated model ---
+const MODEL_429_COOLDOWN_MS = parseInt(process.env.MODEL_429_COOLDOWN_MS || "5000", 10);
+const model429Cooldown = new Map<string, number>();
+
+// --- Global request deadline: keep trying until this wall-clock budget is spent ---
+const GLOBAL_DEADLINE_MS = parseInt(process.env.GLOBAL_DEADLINE_MS || "180000", 10); // 3 minutes
+const ALL_MODELS_IDLE_POLL_MS = parseInt(process.env.ALL_MODELS_IDLE_POLL_MS || "400", 10); // sleep when every model is cooling
 
 
 const router = express.Router();
@@ -122,6 +201,17 @@ const auth = new GoogleAuth({
 });
 
 console.log(`🔧 Initialized Vertex AI for project: ${PROJECT_ID}`);
+
+// Prefer Imagen first, then fall back to imagegeneration@005 if the base model is rate-limited.
+const MODEL_CHAIN: string[] = (
+    process.env.IMAGEN_MODELS
+    || process.env.IMAGEN_MODEL
+    || "imagen-3.0-generate-002,imagegeneration@005"
+).split(",").map(s => s.trim()).filter(Boolean);
+
+// Optional: set IMAGE_BACKEND=gemini to bypass Vertex entirely (not used in this patch)
+const IMAGE_BACKEND = (process.env.IMAGE_BACKEND || "auto").toLowerCase();
+
 
 async function getRelevantEventFromGemini(prompt: string, lastSearch: string): Promise<string> {
     try {
@@ -355,113 +445,147 @@ async function generateImageWithVertexAI(
     lastSearch: string,
     retryCount = 0,
     eventOverride?: string
-): Promise<{ base64: string; localPath: string; finalPrompt: string; event: string }> {
+): Promise<{ base64: string; localPath: string; finalPrompt: string; event: string; provider: string }> {
 
     const { finalPrompt, event } = await preprocessPrompt(prompt, lastSearch, eventOverride);
     console.log(`🎨 Generating image (attempt ${retryCount + 1}): "${finalPrompt}"`);
 
-    const MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
     const authClient = await auth.getClient();
     const accessToken = await authClient.getAccessToken();
     if (!accessToken.token) throw new Error("Failed to get access token");
 
     // Acquire a global token to limit cross-process concurrency (released in finally)
-    const tokenId = await claimGenToken(`api:${process.pid}`);
-    try {
-        const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
+    const tokenId = await claimGenTokenOrWait(`api:${process.pid}`);
+    const startWall = Date.now();
 
-        // Default sampleCount, but shed load under pressure
-        const defaultSamples = Number(process.env.SAMPLE_COUNT || 3);
+    try {
+        // Force 1 sample when the queue is non-trivial to reduce backend load.
+        const defaultSamples = Number(process.env.SAMPLE_COUNT || 1);
         const pending = (genLimiter as any).pendingCount ?? 0;
         const active  = (genLimiter as any).activeCount  ?? 0;
-        const sampleCount = (pending + active) > 2 ? 1 : defaultSamples;
+        const sampleCount = (pending + active) > 0 ? 1 : defaultSamples;
 
-        const parameters: Record<string, any> = {
-            sampleCount,
-            aspectRatio: "1:1",
-            personGeneration: "allow_adult",
-            safetySetting: "block_only_high",
-            language: "en",
-            enhancePrompt: true
-        };
-        if (MODEL.startsWith("imagegeneration@")) {
-            parameters.negativePrompt =
-                "separate panels, collage, split composition, isolated icons, text captions, grayscale, halftone, gradients, missing any required element";
-        }
-        if (process.env.SEED) {
-            parameters.addWatermark = false;
-            parameters.seed = Number(process.env.SEED);
-        }
+        let lastErrorStatus = 0;
+        let lastErrorBody: any = null;
 
-        const requestBody = { instances: [{ prompt: finalPrompt }], parameters };
+        // Keep looping across models until one works or we hit the global deadline.
+        while (Date.now() - startWall < GLOBAL_DEADLINE_MS) {
+            let anyTriedThisPass = false;
+            let allCooling = true;
+            let nextWake = Number.POSITIVE_INFINITY;
 
-        const { ok, status, json } = await fetchJSONWithBackoff(endpoint, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${accessToken.token}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(requestBody)
-        }, { tries: 5, baseDelayMs: 400, maxDelayMs: 5000 });
+            for (const MODEL of MODEL_CHAIN) {
+                const last429 = model429Cooldown.get(MODEL) || 0;
+                const elapsed = Date.now() - last429;
+                const waitLeft = MODEL_429_COOLDOWN_MS - elapsed;
 
-        if (!ok) {
-            // If the backend signaled transient issues, let the outer retry loop handle it
-            console.warn(`Vertex call failed (status=${status})`, json?.error || json);
-            if (retryCount < 2) {
-                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
-                console.log("🔁 Retrying with reworded prompt (after HTTP failure):", rewordedPrompt);
-                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+                if (waitLeft > 0) {
+                    // still cooling
+                    nextWake = Math.min(nextWake, waitLeft);
+                    continue;
+                }
+
+                allCooling = false;
+                anyTriedThisPass = true;
+
+                let workingPrompt = finalPrompt;
+
+                for (let localRetry = 0; localRetry < 3; localRetry++) {
+                    console.log(`🎨 Generating via ${MODEL} (attempt ${retryCount + 1}.${localRetry + 1}): "${workingPrompt}"`);
+
+                    const { ok, status, json } = await predictVertexOnce(
+                        MODEL, accessToken.token, LOCATION, PROJECT_ID, workingPrompt, sampleCount
+                    );
+
+                    if (!ok) {
+                        console.warn(`Vertex call failed (model=${MODEL} status=${status})`, json?.error || json);
+                        lastErrorStatus = status;
+                        lastErrorBody = json;
+
+                        // mark cooldown on 429 and try a different model immediately
+                        if (status === 429) {
+                            model429Cooldown.set(MODEL, Date.now());
+                            break; // break inner retry loop; move to next MODEL
+                        }
+
+                        // Otherwise, try rewording a couple of times before giving up on this MODEL
+                        if (localRetry < 2) {
+                            const rewordedPrompt = await rewordAfterFailureWithGemini(workingPrompt);
+                            console.log("🔁 Retrying with reworded prompt (HTTP failure):", rewordedPrompt);
+                            workingPrompt = rewordedPrompt || workingPrompt;
+                            continue;
+                        }
+
+                        // Give up on this MODEL; try the next one in the chain
+                        break;
+                    }
+
+                    const data = json;
+                    const preds = Array.isArray(data.predictions) ? data.predictions : [];
+                    const candidates = preds
+                        .map((p: any) => p?.bytesBase64Encoded)
+                        .filter((b64: any) => typeof b64 === "string" && b64.length > 0);
+
+                    if (!candidates.length) {
+                        console.warn("⚠️ No image data in response body.", data?.error || "");
+                        if (localRetry < 2) {
+                            const rewordedPrompt = await rewordAfterFailureWithGemini(workingPrompt);
+                            console.log("🔁 Retrying with reworded prompt (no predictions):", rewordedPrompt);
+                            workingPrompt = rewordedPrompt || workingPrompt;
+                            continue;
+                        }
+                        // no candidates after retries; try next MODEL
+                        break;
+                    }
+
+                    // --- SUCCESS path for this MODEL ---
+                    const items = [sanitize(prompt), sanitize(lastSearch || "personal idea"), event];
+
+                    let chosenBase64 = candidates[0];
+                    for (const b64 of candidates) {
+                        const okIncl = await verifyInclusionWithGemini(b64, items);
+                        if (okIncl) { chosenBase64 = b64; break; }
+                    }
+
+                    const buffer = Buffer.from(chosenBase64, "base64");
+                    const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
+                    const bwBuffer = await toPureBlackWhite(buffer, manualT);
+
+                    const filename = `${uuid()}.png`;
+                    const localPath = path.join(imagesDir, filename);
+                    fs.writeFileSync(localPath, bwBuffer);
+
+                    const providerStr = `vertex:${MODEL}`;
+                    return { base64: chosenBase64, localPath, finalPrompt: workingPrompt, event, provider: providerStr };
+                }
+
+                // mark cooldown already handled above on 429
             }
-            throw new Error(`Vertex predict failed (status=${status})`);
-        }
 
-        const data = json;
-        const preds = Array.isArray(data.predictions) ? data.predictions : [];
-        const candidates = preds
-            .map((p: any) => p?.bytesBase64Encoded)
-            .filter((b64: any) => typeof b64 === "string" && b64.length > 0);
-
-        if (!candidates.length) {
-            console.warn("⚠️ No image data in response body.", data?.error || "");
-            if (retryCount < 2) {
-                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
-                console.log("🔁 Retrying with reworded prompt (no predictions):", rewordedPrompt);
-                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
+            // If we didn't try any model because all were cooling, sleep until the soonest cooldown ends.
+            if (!anyTriedThisPass || allCooling) {
+                const sleepMs = Math.max(ALL_MODELS_IDLE_POLL_MS, Math.min(nextWake + 200, 5000));
+                await sleep(sleepMs);
+                continue;
             }
-            throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
+
+            // If we tried at least one model and didn't succeed:
+            // - On non-429 hard errors, don't spin forever—let the outer while try another pass;
+            //   if the deadline hits, we break below and surface an error.
         }
 
-        if (!candidates.length) {
-            console.warn("⚠️ No image data in response.", data?.error || "");
-            if (retryCount < 2) {
-                const rewordedPrompt = await rewordAfterFailureWithGemini(finalPrompt);
-                console.log("🔁 Retrying with reworded prompt:", rewordedPrompt);
-                return await generateImageWithVertexAI(rewordedPrompt, lastSearch, retryCount + 1, event);
-            }
-            throw new Error(`No image data in Vertex AI response after ${retryCount + 1} attempts.`);
+        // Global deadline exceeded
+        if (lastErrorStatus === 429 || lastErrorStatus === 0) {
+            // Treat as saturation timeout
+            throw new Error("deadline-exceeded-waiting-for-capacity");
         }
+        throw new Error(`Vertex predict failed after deadline (lastStatus=${lastErrorStatus})`);
 
-        const items = [sanitize(prompt), sanitize(lastSearch || "personal idea"), event];
-
-        let chosenBase64 = candidates[0];
-        for (const b64 of candidates) {
-            const ok = await verifyInclusionWithGemini(b64, items);
-            if (ok) { chosenBase64 = b64; break; }
-        }
-
-        const buffer = Buffer.from(chosenBase64, "base64");
-        const manualT = process.env.BW_THRESHOLD ? parseInt(process.env.BW_THRESHOLD, 10) : undefined;
-        const bwBuffer = await toPureBlackWhite(buffer, manualT);
-
-        const filename = `${uuid()}.png`;
-        const localPath = path.join(imagesDir, filename);
-        fs.writeFileSync(localPath, bwBuffer);
-
-        return { base64: chosenBase64, localPath, finalPrompt, event };
     } finally {
         try { await releaseGenToken(tokenId); } catch {}
     }
 }
+
 
 
 
@@ -475,8 +599,9 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
             return;
         }
 
-        const { base64, localPath, finalPrompt, event } =
+        const { base64, localPath, finalPrompt, event, provider } =
             await genLimiter(() => generateImageWithVertexAI(prompt, lastSearch));
+        // optional: console.log(`provider=${provider}`);
 
         const objectName = path.basename(localPath);
 
@@ -500,12 +625,28 @@ router.post("/generate", upload.none(), async (req, res): Promise<void> => {
             inputs: { main: mainText, lastSearch: searchText, event }
         });
 
-
-
     } catch (err: any) {
+        const msg = String(err?.message || "");
+        if (msg === "no-generation-token-available-timeout") {
+            res.setHeader("Retry-After", "3");
+            res.status(429).json({ error: "busy", detail: "All generators are busy. Please retry shortly." });
+            return;
+        }
+        if (/deadline-exceeded-waiting-for-capacity/.test(msg)) {
+            // Distinguish long waits from hard failures
+            res.setHeader("Retry-After", "8");
+            res.status(503).json({ error: "busy", detail: "Image backend capacity is temporarily saturated. Please retry shortly." });
+            return;
+        }
+        if (/status=429/.test(msg)) {
+            res.setHeader("Retry-After", "5");
+            res.status(429).json({ error: "busy", detail: "Image backend is rate-limited. Please retry shortly." });
+            return;
+        }
         console.error("❌ Image generation error:", err);
         res.status(500).json({ error: err.message || "Image generation failed" });
     }
+
 });
 
 router.get(
