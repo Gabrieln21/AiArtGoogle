@@ -143,70 +143,156 @@
         });
     });
 
-    const form = document.getElementById('genForm');
-    const input = document.getElementById('promptInput');
-    const status = document.getElementById('status');
-    const gallery = document.getElementById('gallery');
+    (function () {
+        const form = document.getElementById('genForm');
+        const input = document.getElementById('promptInput');
+        const lastSearchInput = document.getElementById('lastSearchInput');
+        const status = document.getElementById('status');
+        const gallery = document.getElementById('gallery');
+        const genBtn = document.getElementById('genBtn');
+        const consent = document.getElementById('consentCheckbox');
 
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
+        let inflight = false;
+        let cooldownUntil = 0;
+        let cooldownTimer = null;
 
-        const userInput = input.value.trim();
-        const lastSearch = document.getElementById('lastSearchInput').value.trim();
-        if (!userInput) return;
+        function now() { return Date.now(); }
 
-        status.textContent = 'Creating… ⏳';
-        status.classList.remove('hidden');
+        function onCooldown() { return now() < cooldownUntil; }
 
-        try {
-            const body = new FormData();
-            body.append('prompt', userInput);
-            body.append('lastSearch', lastSearch);
-
-            const res = await fetch('/api/generate', { method: 'POST', body });
-            if (!res.ok) {
-                const errorData = await res.text();
-                status.textContent = 'Error: ' + errorData;
-                status.className = 'text-sm text-red-600 mt-2';
-                return;
-            }
-            const data = await res.json();
-
-            const masonryItem = document.createElement('div');
-            masonryItem.className = 'aspect-[4/3] rounded overflow-hidden masonry-item';
-
-            const caption = (data.displayCaption || data.prompt || '').trim();
-            const img = document.createElement('img');
-            img.src = data.localPath || data.url;
-            img.alt = caption;
-            const newId = (data && (data.id ?? data.image_id ?? data.imageId ?? (data.image && data.image.id))) || '';
-            img.dataset.id = String(newId);
-
-            img.dataset.url = img.src;
-            img.dataset.prompt = caption;
-            img.onclick = () => openModal(img);
-            img.className = 'gallery-img w-full h-full object-cover rounded cursor-pointer opacity-0 transition-opacity duration-500 ease-in-out';
-
-            // Fade in, then auto-open the modal the first time it loads
-            img.addEventListener('load', () => {
-                img.classList.remove('opacity-0');
-                // Give the fade-in a tick so the modal feels snappy but not jarring
-                setTimeout(() => openModal(img), 50);
-            });
-
-            masonryItem.appendChild(img);
-            gallery.insertBefore(masonryItem, gallery.firstChild);
-
-            form.reset();
-            status.textContent = 'Added!';
-            setTimeout(() => status.classList.add('hidden'), 1500);
-
-        } catch (err) {
-            console.error(err);
-            status.textContent = 'Error: ' + err.message;
-            status.className = 'text-sm text-red-600 mt-2';
+        function refreshGenerateDisabled() {
+            // Button is enabled ONLY if:
+            // - consent is checked
+            // - no request is in-flight
+            // - not in cooldown
+            genBtn.disabled = !consent.checked || inflight || onCooldown();
         }
-    });
+
+        function setBusyUI(busy, label) {
+            inflight = busy;
+            if (busy) {
+                genBtn.dataset.prev = genBtn.textContent;
+                genBtn.textContent = label || 'Creating… ⏳';
+                genBtn.classList.add('opacity-60');
+                input.disabled = true;
+                lastSearchInput.disabled = true;
+            } else {
+                genBtn.textContent = genBtn.dataset.prev || 'Generate';
+                genBtn.classList.remove('opacity-60');
+                input.disabled = false;
+                lastSearchInput.disabled = false;
+            }
+            refreshGenerateDisabled();
+        }
+
+        function startCooldown(ms) {
+            if (!Number.isFinite(ms) || ms <= 0) return;
+            cooldownUntil = now() + ms;
+            if (cooldownTimer) clearInterval(cooldownTimer);
+
+            function tick() {
+                const remain = Math.max(0, Math.ceil((cooldownUntil - now()) / 1000));
+                if (remain <= 0) {
+                    clearInterval(cooldownTimer);
+                    cooldownTimer = null;
+                    genBtn.textContent = 'Generate';
+                    refreshGenerateDisabled();
+                    return;
+                }
+                genBtn.textContent = `Generate (${remain})`;
+                refreshGenerateDisabled();
+            }
+            tick();
+            cooldownTimer = setInterval(tick, 1000);
+        }
+
+        // Keep the button state consistent with consent and timers
+        consent.addEventListener('change', refreshGenerateDisabled);
+        window.addEventListener('DOMContentLoaded', refreshGenerateDisabled);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Front-end guard: block if already running or in cooldown
+            if (inflight || onCooldown()) return;
+
+            const userInput = input.value.trim();
+            const lastSearch = lastSearchInput.value.trim();
+            if (!userInput) return;
+
+            status.textContent = 'Creating… ⏳';
+            status.className = 'text-sm text-gray-500 mt-2';
+            status.classList.remove('hidden');
+            setBusyUI(true, 'Creating… ⏳');
+
+            try {
+                const body = new FormData();
+                body.append('prompt', userInput);
+                body.append('lastSearch', lastSearch);
+
+                const res = await fetch('/api/generate', { method: 'POST', body });
+
+                // If backend returns 429 with Retry-After, show a visible cooldown
+                if (res.status === 429) {
+                    const retryAfterSec = Number(res.headers.get('Retry-After') || '5');
+                    const text = await res.text().catch(() => '');
+                    status.textContent = `Busy — try again in ${retryAfterSec}s. ${text || ''}`.trim();
+                    status.className = 'text-sm text-amber-600 mt-2';
+                    startCooldown(Math.max(1000, retryAfterSec * 1000));
+                    return;
+                }
+
+                if (!res.ok) {
+                    const errorText = await res.text().catch(() => 'Unexpected error');
+                    status.textContent = `Error: ${errorText}`;
+                    status.className = 'text-sm text-red-600 mt-2';
+                    // short client-side throttle to discourage immediate re-clicks
+                    startCooldown(3000);
+                    return;
+                }
+
+                const data = await res.json();
+
+                // Append to masonry
+                const masonryItem = document.createElement('div');
+                masonryItem.className = 'aspect-[4/3] rounded overflow-hidden masonry-item';
+
+                const caption = (data.displayCaption || data.prompt || '').trim();
+                const img = document.createElement('img');
+                img.src = data.localPath || data.url;
+                img.alt = caption;
+                const newId = (data && (data.id ?? data.image_id ?? data.imageId ?? (data.image && data.image.id))) || '';
+                img.dataset.id = String(newId);
+                img.dataset.url = img.src;
+                img.dataset.prompt = caption;
+                img.onclick = () => openModal(img);
+                img.className = 'gallery-img w-full h-full object-cover rounded cursor-pointer opacity-0 transition-opacity duration-500 ease-in-out';
+
+                img.addEventListener('load', () => {
+                    img.classList.remove('opacity-0');
+                    setTimeout(() => openModal(img), 50);
+                });
+
+                masonryItem.appendChild(img);
+                gallery.insertBefore(masonryItem, gallery.firstChild);
+
+                form.reset();
+                status.textContent = 'Added!';
+                status.className = 'text-sm text-green-700 mt-2';
+                setTimeout(() => status.classList.add('hidden'), 1500);
+
+                // gentle cooldown after success
+                startCooldown(4000);
+            } catch (err) {
+                console.error(err);
+                status.textContent = 'Error: ' + (err?.message || 'Network error');
+                status.className = 'text-sm text-red-600 mt-2';
+                startCooldown(3000);
+            } finally {
+                setBusyUI(false);
+            }
+        });
+    })();
 </script>
 
 <div id="imageModal" class="fixed inset-0 bg-black/80 z-50 hidden">
@@ -328,18 +414,16 @@
 
 <script src="https://kit.fontawesome.com/4ad52d1665.js" crossorigin="anonymous"></script>
 <script>
-    const consentCheckbox = document.getElementById('consentCheckbox');
-    const genBtn = document.getElementById('genBtn');
-
-    consentCheckbox.addEventListener('change', () => {
-        genBtn.disabled = !consentCheckbox.checked;
-    });
-
-    // Optional: Check if already checked on load (useful if you're saving state)
+    // Kept minimal: the main submit script handles final disabled state.
+    // This script only normalizes the initial state in case it loads earlier.
     window.addEventListener('DOMContentLoaded', () => {
-        genBtn.disabled = !consentCheckbox.checked;
+        const consent = document.getElementById('consentCheckbox');
+        const genBtn = document.getElementById('genBtn');
+        if (!consent || !genBtn) return;
+        genBtn.disabled = !consent.checked; // initial render only; main script will take over
     });
 </script>
+
 <script>
     document.querySelectorAll('details[data-exclusive]').forEach(detail => {
         detail.addEventListener('toggle', () => {
